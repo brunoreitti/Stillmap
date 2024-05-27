@@ -1,14 +1,34 @@
 import pygame
+import ctypes
 import sys
 
 # Initialize Pygame
 pygame.init()
 
+# Create a resizable Pygame window
+screen = pygame.display.set_mode((800, 600), pygame.RESIZABLE)
+pygame.display.set_caption("Checkerboard Game")
+
+# Get the handle of the Pygame window
+window_handle = pygame.display.get_wm_info()["window"]
+
+# Define constants for Windows messages
+SW_MAXIMIZE = 3
+
+# Define the user32 library for sending messages to the window
+user32 = ctypes.windll.user32
+
+# Maximize the window
+user32.ShowWindow(window_handle, SW_MAXIMIZE)
+
+# Get the screen dimensions after maximizing
+screen_width, screen_height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+
 # Constants
-BOARD_SIZE = 600  # Size of the board
-WINDOW_WIDTH, WINDOW_HEIGHT = 600, 650  # Size of the window
+BOARD_SIZE = 300  # Size of the board
 ROWS, COLS = 8, 8  # Size of the board
 SQUARE_SIZE = BOARD_SIZE // COLS  # Size of each square
+SIDEBAR_WIDTH = BOARD_SIZE + 20  # Width of the sidebar to house the board and button
 
 # Colors
 WHITE = (255, 255, 255)
@@ -19,10 +39,8 @@ GRAY = (200, 200, 200)
 LIGHT_GRAY = (220, 220, 220)
 DARK_GRAY = (50, 50, 50)
 BLUE = (0, 0, 255)
-
-# Create the screen
-screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-pygame.display.set_caption("8x8 Checkerboard Game")
+MAIN_BG_COLOR = (50, 50, 50)
+SIDEBAR_BG_COLOR = (150, 150, 150)
 
 # Player's starting position and direction (0: up, 1: up-right, 2: right, 3: down-right, 4: down, 5: down-left, 6: left, 7: up-left)
 player_pos = [7, 0]
@@ -40,13 +58,14 @@ class Tile:
         self.color = WHITE
         self.active = True  # Tile is active (can be moved to)
 
-    def draw(self, screen, mouse_pos):
-        if self.rect.collidepoint(mouse_pos) and edit_mode:
+    def draw(self, screen, mouse_pos, offset_x, offset_y):
+        adjusted_rect = self.rect.move(offset_x, offset_y)
+        if adjusted_rect.collidepoint(mouse_pos) and edit_mode:
             self.color = LIGHT_GRAY
         else:
             self.color = WHITE if self.active else DARK_GRAY
-        pygame.draw.rect(screen, self.color, self.rect)
-        pygame.draw.rect(screen, BLACK, self.rect, 1)
+        pygame.draw.rect(screen, self.color, adjusted_rect)
+        pygame.draw.rect(screen, BLACK, adjusted_rect, 1)
 
     def toggle_active(self):
         self.active = not self.active
@@ -55,14 +74,13 @@ class Tile:
 # Create the board with Tile objects
 board = [[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)]
 
-def draw_board(mouse_pos):
-    screen.fill(WHITE)
+def draw_board(mouse_pos, offset_x, offset_y):
     for row in range(ROWS):
         for col in range(COLS):
-            board[row][col].draw(screen, mouse_pos)
+            board[row][col].draw(screen, mouse_pos, offset_x, offset_y)
 
-def draw_player():
-    player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE)
+def draw_player(offset_x, offset_y):
+    player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE).move(offset_x, offset_y)
     pygame.draw.rect(screen, GREEN, player_rect)
     
     # Draw direction arrow
@@ -128,7 +146,7 @@ def toggle_edit_mode():
 def draw_edit_button():
     button_color = GREEN if edit_mode else RED
     button_text = "Edit Mode: ON" if edit_mode else "Edit Mode: OFF"
-    button_rect = pygame.Rect(200, 605, 200, 40)
+    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, 10, SIDEBAR_WIDTH - 20, 40)
     pygame.draw.rect(screen, button_color, button_rect)
     font = pygame.font.Font(None, 36)
     text = font.render(button_text, True, BLACK)
@@ -139,6 +157,12 @@ def draw_edit_button():
 # Main game loop
 running = True
 while running:
+    screen.fill(MAIN_BG_COLOR)  # Fill the main area with the main background color
+
+    # Draw the sidebar background
+    sidebar_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH, 0, SIDEBAR_WIDTH, screen_height)
+    pygame.draw.rect(screen, SIDEBAR_BG_COLOR, sidebar_rect)
+
     mouse_pos = pygame.mouse.get_pos()
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -159,11 +183,15 @@ while running:
             elif event.button == 3 and edit_mode:  # Right-click to toggle tile active/inactive in edit mode
                 for row in range(ROWS):
                     for col in range(COLS):
-                        if board[row][col].rect.collidepoint(event.pos):
+                        adjusted_rect = board[row][col].rect.move(offset_x, offset_y)
+                        if adjusted_rect.collidepoint(event.pos):
                             board[row][col].toggle_active()
 
-    draw_board(mouse_pos)
-    draw_player()
+    offset_x = screen_width - SIDEBAR_WIDTH + 10
+    offset_y = 60
+
+    draw_board(mouse_pos, offset_x, offset_y)
+    draw_player(offset_x, offset_y)
     edit_button_rect = draw_edit_button()
     pygame.display.flip()
 
