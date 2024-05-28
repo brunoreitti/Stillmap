@@ -26,9 +26,10 @@ screen_width, screen_height = user32.GetSystemMetrics(0), user32.GetSystemMetric
 
 # Constants
 BOARD_SIZE = 300  # Size of the board
-ROWS, COLS = 8, 8  # Size of the board
+ROWS, COLS = 9, 9  # Size of the board
 SQUARE_SIZE = BOARD_SIZE // COLS  # Size of each square
 SIDEBAR_WIDTH = BOARD_SIZE + 20  # Width of the sidebar to house the board and button
+NUM_BOARDS = 3  # Number of 9x9 boards in each direction (3x3 grid)
 
 # Colors
 WHITE = (255, 255, 255)
@@ -42,9 +43,12 @@ BLUE = (0, 0, 255)
 MAIN_BG_COLOR = (50, 50, 50)
 SIDEBAR_BG_COLOR = (150, 150, 150)
 
-# Player's starting position and direction (0: up, 1: up-right, 2: right, 3: down-right, 4: down, 5: down-left, 6: left, 7: up-left)
-player_pos = [7, 0]
+# Player's starting position in the center of the middle board
+player_pos = [ROWS // 2, COLS // 2]
 player_direction = 0
+
+# Track which 9x9 board the player is currently in (starting in the center of the larger grid)
+current_board = [NUM_BOARDS // 2, NUM_BOARDS // 2]
 
 # Edit mode toggle
 edit_mode = False
@@ -71,10 +75,15 @@ class Tile:
         self.active = not self.active
         self.color = WHITE if self.active else BLACK
 
-# Create the board with Tile objects
-board = [[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)]
+# Create the board with Tile objects for each 9x9 grid in the 3x3 grid
+boards = [[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS * NUM_BOARDS)]
+
+def get_current_board():
+    board_index = current_board[0] * NUM_BOARDS + current_board[1]
+    return boards[board_index]
 
 def draw_board(mouse_pos, offset_x, offset_y):
+    board = get_current_board()
     for row in range(ROWS):
         for col in range(COLS):
             board[row][col].draw(screen, mouse_pos, offset_x, offset_y)
@@ -106,6 +115,8 @@ def draw_player(offset_x, offset_y):
         pygame.draw.polygon(screen, RED, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
 
 def move_player(forward=True):
+    global current_board
+
     new_pos = player_pos[:]
     if player_direction == 0:  # Up
         new_pos[0] -= 1 if forward else 1
@@ -128,8 +139,35 @@ def move_player(forward=True):
         new_pos[0] -= 1 if forward else 1
         new_pos[1] -= 1 if forward else 1
 
-    # Check if the new position is within bounds and active
-    if 0 <= new_pos[0] < ROWS and 0 <= new_pos[1] < COLS and board[new_pos[0]][new_pos[1]].active:
+    # Check for board transitions
+    if new_pos[0] < 0:
+        if current_board[0] > 0:
+            new_pos[0] = ROWS - 1
+            current_board[0] -= 1
+        else:
+            new_pos[0] = 0
+    elif new_pos[0] >= ROWS:
+        if current_board[0] < NUM_BOARDS - 1:
+            new_pos[0] = 0
+            current_board[0] += 1
+        else:
+            new_pos[0] = ROWS - 1
+    if new_pos[1] < 0:
+        if current_board[1] > 0:
+            new_pos[1] = COLS - 1
+            current_board[1] -= 1
+        else:
+            new_pos[1] = 0
+    elif new_pos[1] >= COLS:
+        if current_board[1] < NUM_BOARDS - 1:
+            new_pos[1] = 0
+            current_board[1] += 1
+        else:
+            new_pos[1] = COLS - 1
+
+    # Prevent moving into inactive tiles
+    if get_current_board()[new_pos[0]][new_pos[1]].active:
+        # Update the player's position
         player_pos[0], player_pos[1] = new_pos
 
 def rotate_player(key):
@@ -181,6 +219,7 @@ while running:
                 if edit_button_rect.collidepoint(event.pos):
                     toggle_edit_mode()
             elif event.button == 3 and edit_mode:  # Right-click to toggle tile active/inactive in edit mode
+                board = get_current_board()
                 for row in range(ROWS):
                     for col in range(COLS):
                         adjusted_rect = board[row][col].rect.move(offset_x, offset_y)
