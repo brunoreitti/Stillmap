@@ -78,9 +78,12 @@ class Tile:
 # Create the board with Tile objects for each 9x9 grid in the 3x3 grid
 boards = [[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS * NUM_BOARDS)]
 
+def get_board(board_index):
+    return boards[board_index]
+
 def get_current_board():
     board_index = current_board[0] * NUM_BOARDS + current_board[1]
-    return boards[board_index]
+    return get_board(board_index)
 
 def draw_board(mouse_pos, offset_x, offset_y):
     board = get_current_board()
@@ -139,36 +142,41 @@ def move_player(forward=True):
         new_pos[0] -= 1 if forward else 1
         new_pos[1] -= 1 if forward else 1
 
+    new_board = current_board[:]
     # Check for board transitions
     if new_pos[0] < 0:
         if current_board[0] > 0:
             new_pos[0] = ROWS - 1
-            current_board[0] -= 1
+            new_board[0] -= 1
         else:
             new_pos[0] = 0
     elif new_pos[0] >= ROWS:
         if current_board[0] < NUM_BOARDS - 1:
             new_pos[0] = 0
-            current_board[0] += 1
+            new_board[0] += 1
         else:
             new_pos[0] = ROWS - 1
     if new_pos[1] < 0:
         if current_board[1] > 0:
             new_pos[1] = COLS - 1
-            current_board[1] -= 1
+            new_board[1] -= 1
         else:
             new_pos[1] = 0
     elif new_pos[1] >= COLS:
         if current_board[1] < NUM_BOARDS - 1:
             new_pos[1] = 0
-            current_board[1] += 1
+            new_board[1] += 1
         else:
             new_pos[1] = COLS - 1
 
-    # Prevent moving into inactive tiles
-    if get_current_board()[new_pos[0]][new_pos[1]].active:
-        # Update the player's position
-        player_pos[0], player_pos[1] = new_pos
+    # Check if the new position is in an active tile
+    if new_board != current_board:
+        if get_board(new_board[0] * NUM_BOARDS + new_board[1])[new_pos[0]][new_pos[1]].active:
+            current_board[:] = new_board
+            player_pos[:] = new_pos
+    else:
+        if get_current_board()[new_pos[0]][new_pos[1]].active:
+            player_pos[:] = new_pos
 
 def rotate_player(key):
     global player_direction
