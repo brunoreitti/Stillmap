@@ -61,26 +61,22 @@ root = Tk()
 root.withdraw()
 
 # Image management
-images = []
 current_image_index = 0
 
 def load_images_from_directory(directory):
-    global images
     images = []
+    filenames = []
     for filename in os.listdir(directory):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
             filepath = os.path.join(directory, filename)
             image = pygame.image.load(filepath)
             images.append(image)
-    if images:
-        print(f"Loaded {len(images)} images.")
-    else:
-        print("No images found in the selected directory.")
+            filenames.append(filename)
+    return images, filenames
 
 def open_file_explorer():
     directory = filedialog.askdirectory()
-    if directory:
-        load_images_from_directory(directory)
+    return directory
 
 class Tile:
     def __init__(self, row, col, size):
@@ -91,6 +87,9 @@ class Tile:
         self.color = WHITE
         self.active = True  # Tile is active (can be moved to)
         self.image = None
+        self.directory = None
+        self.images = []
+        self.image_filenames = []
 
     def draw(self, screen, mouse_pos, offset_x, offset_y):
         adjusted_rect = self.rect.move(offset_x, offset_y)
@@ -105,9 +104,10 @@ class Tile:
         self.active = not self.active
         self.color = WHITE if self.active else BLACK
 
-    def set_image(self, image_path):
-        self.image = pygame.image.load(image_path)
-        self.image = pygame.transform.scale(self.image, (self.size, self.size))
+    def set_directory(self, directory):
+        self.directory = directory
+        if directory:
+            self.images, self.image_filenames = load_images_from_directory(directory)
 
 # Create the board with Tile objects for each 9x9 grid in the 3x3 grid
 boards = [[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS * NUM_BOARDS)]
@@ -118,6 +118,9 @@ def get_board(board_index):
 def get_current_board():
     board_index = current_board[0] * NUM_BOARDS + current_board[1]
     return get_board(board_index)
+
+def get_current_tile():
+    return get_current_board()[player_pos[0]][player_pos[1]]
 
 def draw_board(mouse_pos, offset_x, offset_y):
     board = get_current_board()
@@ -155,28 +158,32 @@ def move_player(forward=True):
     global current_board
 
     new_pos = player_pos[:]
-    if player_direction == 0:  # Up
-        new_pos[0] -= 1 if forward else 1
-    elif player_direction == 1:  # Up-right
-        new_pos[0] -= 1 if forward else 1
-        new_pos[1] += 1 if forward else -1
-    elif player_direction == 2:  # Right
-        new_pos[1] += 1 if forward else -1
-    elif player_direction == 3:  # Down-right
-        new_pos[0] += 1 if forward else -1
-        new_pos[1] += 1 if forward else -1
-    elif player_direction == 4:  # Down
-        new_pos[0] += 1 if forward else -1
-    elif player_direction == 5:  # Down-left
-        new_pos[0] += 1 if forward else -1
-        new_pos[1] -= 1 if forward else 1
-    elif player_direction == 6:  # Left
-        new_pos[1] -= 1 if forward else 1
-    elif player_direction == 7:  # Up-left
-        new_pos[0] -= 1 if forward else 1
-        new_pos[1] -= 1 if forward else 1
+    direction = player_direction if forward else (player_direction + 4) % 8  # Adjust direction for backward movement
+
+    if direction == 0:  # Up
+        new_pos[0] -= 1
+    elif direction == 1:  # Up-right
+        new_pos[0] -= 1
+        new_pos[1] += 1
+    elif direction == 2:  # Right
+        new_pos[1] += 1
+    elif direction == 3:  # Down-right
+        new_pos[0] += 1
+        new_pos[1] += 1
+    elif direction == 4:  # Down
+        new_pos[0] += 1
+    elif direction == 5:  # Down-left
+        new_pos[0] += 1
+        new_pos[1] -= 1
+    elif direction == 6:  # Left
+        new_pos[1] -= 1
+    elif direction == 7:  # Up-left
+        new_pos[0] -= 1
+        new_pos[1] -= 1
 
     new_board = current_board[:]
+    print(f"Attempting to move to position: {new_pos} on board: {new_board}")
+
     # Check for board transitions
     if new_pos[0] < 0:
         if current_board[0] > 0:
@@ -208,16 +215,24 @@ def move_player(forward=True):
         if get_board(new_board[0] * NUM_BOARDS + new_board[1])[new_pos[0]][new_pos[1]].active:
             current_board[:] = new_board
             player_pos[:] = new_pos
+            print(f"Moved to new board: {new_board}, new position: {new_pos}")
+        else:
+            print("Cannot move to inactive tile.")
     else:
         if get_current_board()[new_pos[0]][new_pos[1]].active:
             player_pos[:] = new_pos
+            print(f"Moved to position: {new_pos}")
+        else:
+            print("Cannot move to inactive tile.")
 
 def rotate_player(key):
-    global player_direction
+    global player_direction, current_image_index
     if key == pygame.K_LEFT:
         player_direction = (player_direction - 1) % 8
+        current_image_index = (current_image_index - 1) % len(get_current_tile().images) if get_current_tile().images else 0
     elif key == pygame.K_RIGHT:
         player_direction = (player_direction + 1) % 8
+        current_image_index = (current_image_index + 1) % len(get_current_tile().images) if get_current_tile().images else 0
 
 def toggle_edit_mode():
     global edit_mode
@@ -237,7 +252,7 @@ def draw_edit_button():
 def draw_image_button():
     button_color = BLUE
     button_text = "Select Folder"
-    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, screen_height // 2 - 20, SIDEBAR_WIDTH - 20, 40)
+    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) - 20, SIDEBAR_WIDTH - 20, 40)
     pygame.draw.rect(screen, button_color, button_rect)
     font = pygame.font.Font(None, 36)
     text = font.render(button_text, True, BLACK)
@@ -245,10 +260,17 @@ def draw_image_button():
     screen.blit(text, text_rect)
     return button_rect
 
+def draw_file_list(tile):
+    font = pygame.font.Font(None, 24)
+    start_y = screen_height - 200  # Start displaying from 200 pixels above the bottom
+    for i, filename in enumerate(tile.image_filenames):
+        text_surface = font.render(filename, True, BLACK)
+        text_rect = text_surface.get_rect(topleft=(screen_width - SIDEBAR_WIDTH + 10, start_y + i * 30))
+        screen.blit(text_surface, text_rect)
+
 # Main game loop
 running = True
 selected_tile = None
-selected_image = None
 while running:
     screen.fill(MAIN_BG_COLOR)  # Fill the main area with the main background color
 
@@ -274,14 +296,18 @@ while running:
                 if edit_button_rect.collidepoint(event.pos):
                     toggle_edit_mode()
                 elif image_button_rect.collidepoint(event.pos):
-                    open_file_explorer()
+                    directory = open_file_explorer()
+                    if directory:
+                        current_tile = get_current_tile()
+                        current_tile.set_directory(directory)
+                        current_image_index = 0  # Reset image index when a new folder is assigned
             elif event.button == 3 and edit_mode:  # Right-click to toggle tile active/inactive in edit mode
                 board = get_current_board()
                 for row in range(ROWS):
                     for col in range(COLS):
                         adjusted_rect = board[row][col].rect.move(offset_x, offset_y)
                         if adjusted_rect.collidepoint(event.pos):
-                            selected_tile = board[row][col]
+                            board[row][col].toggle_active()
 
     offset_x = screen_width - SIDEBAR_WIDTH + 10
     offset_y = 60
@@ -290,14 +316,17 @@ while running:
     draw_player(offset_x, offset_y)
     edit_button_rect = draw_edit_button()
     image_button_rect = draw_image_button()
+    current_tile = get_current_tile()
+    if current_tile.directory:
+        draw_file_list(current_tile)
 
     # Draw the image display area
     image_display_area = pygame.Rect(10, 10, screen_width - SIDEBAR_WIDTH - 20, screen_height - 20)
     pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
 
-    # Display the selected image
-    if images:
-        current_image = images[current_image_index]
+    # Display the selected image if the current tile has images
+    if current_tile.images:
+        current_image = current_tile.images[current_image_index]
         scaled_image = pygame.transform.scale(current_image, (image_display_area.width, image_display_area.height))
         screen.blit(scaled_image, (image_display_area.x, image_display_area.y))
 
