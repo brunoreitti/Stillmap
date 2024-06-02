@@ -2,7 +2,8 @@ import pygame
 import ctypes
 import sys
 import os
-from tkinter import Tk, filedialog
+import json
+from tkinter import Tk, filedialog, simpledialog, messagebox
 
 # Initialize Pygame
 pygame.init()
@@ -63,6 +64,10 @@ root.withdraw()
 # Image management
 current_image_index = 0
 
+# Define the directory to save and load the game state JSON files
+save_directory = "saved_game_states"
+os.makedirs(save_directory, exist_ok=True)
+
 def load_images_from_directory(directory):
     images = []
     filenames = []
@@ -109,11 +114,16 @@ class Tile:
         if directory:
             self.images, self.image_filenames = load_images_from_directory(directory)
 
+    def clear_directory(self):
+        self.directory = None
+        self.images = []
+        self.image_filenames = []
+
 # Create the board with Tile objects for each 9x9 grid in the 3x3 grid
-boards = [[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS * NUM_BOARDS)]
+boards = [[[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS)] for _ in range(NUM_BOARDS)]
 
 def get_board(board_index):
-    return boards[board_index]
+    return boards[board_index // NUM_BOARDS][board_index % NUM_BOARDS]
 
 def get_current_board():
     board_index = current_board[0] * NUM_BOARDS + current_board[1]
@@ -124,9 +134,9 @@ def get_current_tile():
 
 def draw_board(mouse_pos, offset_x, offset_y):
     board = get_current_board()
-    for row in range(ROWS):
-        for col in range(COLS):
-            board[row][col].draw(screen, mouse_pos, offset_x, offset_y)
+    for row in board:
+        for tile in row:
+            tile.draw(screen, mouse_pos, offset_x, offset_y)
 
 def draw_player(offset_x, offset_y):
     player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE).move(offset_x, offset_y)
@@ -153,6 +163,7 @@ def draw_player(offset_x, offset_y):
         pygame.draw.polygon(screen, RED, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
     elif player_direction == 7:  # Up-left
         pygame.draw.polygon(screen, RED, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
+
 
 def move_player(forward=True):
     global current_board
@@ -252,7 +263,40 @@ def draw_edit_button():
 def draw_image_button():
     button_color = BLUE
     button_text = "Select Folder"
-    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) - 20, SIDEBAR_WIDTH - 20, 40)
+    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) - 60, SIDEBAR_WIDTH - 20, 40)
+    pygame.draw.rect(screen, button_color, button_rect)
+    font = pygame.font.Font(None, 36)
+    text = font.render(button_text, True, BLACK)
+    text_rect = text.get_rect(center=button_rect.center)
+    screen.blit(text, text_rect)
+    return button_rect
+
+def draw_save_button():
+    button_color = BLUE
+    button_text = "Save Game"
+    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2), SIDEBAR_WIDTH - 20, 40)
+    pygame.draw.rect(screen, button_color, button_rect)
+    font = pygame.font.Font(None, 36)
+    text = font.render(button_text, True, BLACK)
+    text_rect = text.get_rect(center=button_rect.center)
+    screen.blit(text, text_rect)
+    return button_rect
+
+def draw_load_button():
+    button_color = BLUE
+    button_text = "Load Game"
+    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 60, SIDEBAR_WIDTH - 20, 40)
+    pygame.draw.rect(screen, button_color, button_rect)
+    font = pygame.font.Font(None, 36)
+    text = font.render(button_text, True, BLACK)
+    text_rect = text.get_rect(center=button_rect.center)
+    screen.blit(text, text_rect)
+    return button_rect
+
+def draw_delete_button():
+    button_color = BLUE
+    button_text = "Remove Folder"
+    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 120, SIDEBAR_WIDTH - 20, 40)
     pygame.draw.rect(screen, button_color, button_rect)
     font = pygame.font.Font(None, 36)
     text = font.render(button_text, True, BLACK)
@@ -267,6 +311,90 @@ def draw_file_list(tile):
         text_surface = font.render(filename, True, BLACK)
         text_rect = text_surface.get_rect(topleft=(screen_width - SIDEBAR_WIDTH + 10, start_y + i * 30))
         screen.blit(text_surface, text_rect)
+
+def remove_current_tile_folder():
+    current_tile = get_current_tile()
+    current_tile.clear_directory()
+    print(f"Removed folder association from the current tile.")
+
+# Functions to save and load the game state
+def save_game_state():
+    filename = simpledialog.askstring("Save Game", "Enter the save file name:")
+    if not filename:
+        messagebox.showwarning("Save Game", "Save file name cannot be empty.")
+        return
+
+    filepath = os.path.join(save_directory, f"{filename}.json")
+    game_state = {
+        "player_position": player_pos,
+        "player_direction": player_direction,
+        "current_board": current_board,
+        "tiles": []
+    }
+
+    for board_row in boards:
+        for board in board_row:
+            for row in board:
+                for tile in row:
+                    tile_data = {
+                        "row": tile.row,
+                        "col": tile.col,
+                        "active": tile.active,
+                        "directory": tile.directory,
+                        "image_filenames": tile.image_filenames
+                    }
+                    game_state["tiles"].append(tile_data)
+
+    with open(filepath, "w") as file:
+        json.dump(game_state, file, indent=4)
+    print("Game state saved.")
+
+def load_game_state():
+    files = [f for f in os.listdir(save_directory) if f.endswith(".json")]
+    if not files:
+        messagebox.showwarning("Load Game", "No saved games found.")
+        return
+
+    selected_file = filedialog.askopenfilename(
+        title="Select a saved game",
+        initialdir=save_directory,
+        filetypes=[("JSON files", "*.json")]
+    )
+
+    if not selected_file:
+        return
+
+    global player_pos, player_direction, current_board, current_image_index
+
+    # Clear the current game state
+    for board_row in boards:
+        for board in board_row:
+            for row in board:
+                for tile in row:
+                    tile.active = True
+                    tile.clear_directory()
+
+    try:
+        with open(selected_file, "r") as file:
+            game_state = json.load(file)
+        
+        player_pos = game_state["player_position"]
+        player_direction = game_state["player_direction"]
+        current_board = game_state["current_board"]
+
+        for tile_data in game_state["tiles"]:
+            board_index = tile_data["row"] // ROWS * NUM_BOARDS + tile_data["col"] // COLS
+            tile = boards[board_index // NUM_BOARDS][board_index % NUM_BOARDS][tile_data["row"] % ROWS][tile_data["col"] % COLS]
+            tile.active = tile_data["active"]
+            tile.directory = tile_data["directory"]
+            tile.image_filenames = tile_data["image_filenames"]
+            if tile_data["directory"]:
+                tile.images, _ = load_images_from_directory(tile_data["directory"])
+                
+        current_image_index = 0
+        print("Game state loaded.")
+    except FileNotFoundError:
+        print("No saved game state found.")
 
 # Main game loop
 running = True
@@ -301,13 +429,19 @@ while running:
                         current_tile = get_current_tile()
                         current_tile.set_directory(directory)
                         current_image_index = 0  # Reset image index when a new folder is assigned
+                elif save_button_rect.collidepoint(event.pos):
+                    save_game_state()
+                elif load_button_rect.collidepoint(event.pos):
+                    load_game_state()
+                elif delete_button_rect.collidepoint(event.pos):
+                    remove_current_tile_folder()
             elif event.button == 3 and edit_mode:  # Right-click to toggle tile active/inactive in edit mode
                 board = get_current_board()
-                for row in range(ROWS):
-                    for col in range(COLS):
-                        adjusted_rect = board[row][col].rect.move(offset_x, offset_y)
+                for row in board:
+                    for tile in row:
+                        adjusted_rect = tile.rect.move(offset_x, offset_y)
                         if adjusted_rect.collidepoint(event.pos):
-                            board[row][col].toggle_active()
+                            tile.toggle_active()
 
     offset_x = screen_width - SIDEBAR_WIDTH + 10
     offset_y = 60
@@ -316,6 +450,9 @@ while running:
     draw_player(offset_x, offset_y)
     edit_button_rect = draw_edit_button()
     image_button_rect = draw_image_button()
+    save_button_rect = draw_save_button()
+    load_button_rect = draw_load_button()
+    delete_button_rect = draw_delete_button()
     current_tile = get_current_tile()
     if current_tile.directory:
         draw_file_list(current_tile)
