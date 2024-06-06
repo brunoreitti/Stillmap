@@ -1,11 +1,12 @@
 import pygame
+import pygame_gui
 import ctypes
 import sys
 import os
 import json
 from tkinter import Tk, filedialog, simpledialog, messagebox
 
-# Initialize Pygame
+# Initialize Pygame and Pygame GUI
 pygame.init()
 
 # Create a resizable Pygame window
@@ -248,69 +249,7 @@ def rotate_player(key):
 def toggle_edit_mode():
     global edit_mode
     edit_mode = not edit_mode
-
-def draw_edit_button():
-    button_color = GREEN if edit_mode else RED
-    button_text = "Edit Mode: ON" if edit_mode else "Edit Mode: OFF"
-    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, 10, SIDEBAR_WIDTH - 20, 40)
-    pygame.draw.rect(screen, button_color, button_rect)
-    font = pygame.font.Font(None, 36)
-    text = font.render(button_text, True, BLACK)
-    text_rect = text.get_rect(center=button_rect.center)
-    screen.blit(text, text_rect)
-    return button_rect
-
-def draw_image_button():
-    button_color = BLUE
-    button_text = "Select Folder"
-    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) - 60, SIDEBAR_WIDTH - 20, 40)
-    pygame.draw.rect(screen, button_color, button_rect)
-    font = pygame.font.Font(None, 36)
-    text = font.render(button_text, True, BLACK)
-    text_rect = text.get_rect(center=button_rect.center)
-    screen.blit(text, text_rect)
-    return button_rect
-
-def draw_save_button():
-    button_color = BLUE
-    button_text = "Save Game"
-    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2), SIDEBAR_WIDTH - 20, 40)
-    pygame.draw.rect(screen, button_color, button_rect)
-    font = pygame.font.Font(None, 36)
-    text = font.render(button_text, True, BLACK)
-    text_rect = text.get_rect(center=button_rect.center)
-    screen.blit(text, text_rect)
-    return button_rect
-
-def draw_load_button():
-    button_color = BLUE
-    button_text = "Load Game"
-    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 60, SIDEBAR_WIDTH - 20, 40)
-    pygame.draw.rect(screen, button_color, button_rect)
-    font = pygame.font.Font(None, 36)
-    text = font.render(button_text, True, BLACK)
-    text_rect = text.get_rect(center=button_rect.center)
-    screen.blit(text, text_rect)
-    return button_rect
-
-def draw_delete_button():
-    button_color = BLUE
-    button_text = "Remove Folder"
-    button_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 120, SIDEBAR_WIDTH - 20, 40)
-    pygame.draw.rect(screen, button_color, button_rect)
-    font = pygame.font.Font(None, 36)
-    text = font.render(button_text, True, BLACK)
-    text_rect = text.get_rect(center=button_rect.center)
-    screen.blit(text, text_rect)
-    return button_rect
-
-def draw_file_list(tile):
-    font = pygame.font.Font(None, 24)
-    start_y = screen_height - 200  # Start displaying from 200 pixels above the bottom
-    for i, filename in enumerate(tile.image_filenames):
-        text_surface = font.render(filename, True, BLACK)
-        text_rect = text_surface.get_rect(topleft=(screen_width - SIDEBAR_WIDTH + 10, start_y + i * 30))
-        screen.blit(text_surface, text_rect)
+    edit_button.set_text(f"Edit Mode: {'ON' if edit_mode else 'OFF'}")
 
 def remove_current_tile_folder():
     current_tile = get_current_tile()
@@ -396,10 +335,58 @@ def load_game_state():
     except FileNotFoundError:
         print("No saved game state found.")
 
+def draw_current_tile_info():
+    font = pygame.font.Font(None, 24)
+    board_label = f"Board: ({current_board[0]}, {current_board[1]})"
+    tile_label = f"Tile: ({player_pos[0]}, {player_pos[1]})"
+
+    board_text = font.render(board_label, True, BLACK)
+    tile_text = font.render(tile_label, True, BLACK)
+
+    screen.blit(board_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 100))
+    screen.blit(tile_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 70))
+
+# Setup pygame_gui manager
+manager = pygame_gui.UIManager((screen_width, screen_height))
+
+# Create GUI buttons
+edit_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, 10), (SIDEBAR_WIDTH - 20, 40)),
+    text="Edit Mode: OFF",
+    manager=manager
+)
+
+image_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) - 60), (SIDEBAR_WIDTH - 20, 40)),
+    text="Select Folder",
+    manager=manager
+)
+
+save_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2)), (SIDEBAR_WIDTH - 20, 40)),
+    text="Save Game",
+    manager=manager
+)
+
+load_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 60), (SIDEBAR_WIDTH - 20, 40)),
+    text="Load Game",
+    manager=manager
+)
+
+delete_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 120), (SIDEBAR_WIDTH - 20, 40)),
+    text="Remove Folder",
+    manager=manager
+)
+
+clock = pygame.time.Clock()
+
 # Main game loop
 running = True
 selected_tile = None
 while running:
+    time_delta = clock.tick(60) / 1000.0  # Limits the frame rate to 60 FPS
     screen.fill(MAIN_BG_COLOR)  # Fill the main area with the main background color
 
     # Draw the sidebar background
@@ -419,40 +406,32 @@ while running:
                 move_player(forward=False)
             elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
                 rotate_player(event.key)
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:  # Left click
-                if edit_button_rect.collidepoint(event.pos):
+        elif event.type == pygame.USEREVENT:
+            if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                if event.ui_element == edit_button:
                     toggle_edit_mode()
-                elif image_button_rect.collidepoint(event.pos):
+                elif event.ui_element == image_button:
                     directory = open_file_explorer()
                     if directory:
                         current_tile = get_current_tile()
                         current_tile.set_directory(directory)
                         current_image_index = 0  # Reset image index when a new folder is assigned
-                elif save_button_rect.collidepoint(event.pos):
+                elif event.ui_element == save_button:
                     save_game_state()
-                elif load_button_rect.collidepoint(event.pos):
+                elif event.ui_element == load_button:
                     load_game_state()
-                elif delete_button_rect.collidepoint(event.pos):
+                elif event.ui_element == delete_button:
                     remove_current_tile_folder()
-            elif event.button == 3 and edit_mode:  # Right-click to toggle tile active/inactive in edit mode
-                board = get_current_board()
-                for row in board:
-                    for tile in row:
-                        adjusted_rect = tile.rect.move(offset_x, offset_y)
-                        if adjusted_rect.collidepoint(event.pos):
-                            tile.toggle_active()
+        
+        manager.process_events(event)
+
+    manager.update(time_delta)
 
     offset_x = screen_width - SIDEBAR_WIDTH + 10
     offset_y = 60
 
     draw_board(mouse_pos, offset_x, offset_y)
     draw_player(offset_x, offset_y)
-    edit_button_rect = draw_edit_button()
-    image_button_rect = draw_image_button()
-    save_button_rect = draw_save_button()
-    load_button_rect = draw_load_button()
-    delete_button_rect = draw_delete_button()
     current_tile = get_current_tile()
     if current_tile.directory:
         draw_file_list(current_tile)
@@ -466,6 +445,9 @@ while running:
         current_image = current_tile.images[current_image_index]
         scaled_image = pygame.transform.scale(current_image, (image_display_area.width, image_display_area.height))
         screen.blit(scaled_image, (image_display_area.x, image_display_area.y))
+
+    draw_current_tile_info()
+    manager.draw_ui(screen)
 
     pygame.display.flip()
 
