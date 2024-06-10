@@ -278,6 +278,8 @@ def save_game_state():
                     tile_data = {
                         "row": tile.row,
                         "col": tile.col,
+                        "board_row": boards.index(board_row),
+                        "board_col": board_row.index(board),
                         "active": tile.active,
                         "directory": tile.directory,
                         "image_filenames": tile.image_filenames
@@ -322,8 +324,8 @@ def load_game_state():
         current_board = game_state["current_board"]
 
         for tile_data in game_state["tiles"]:
-            board_index = tile_data["row"] // ROWS * NUM_BOARDS + tile_data["col"] // COLS
-            tile = boards[board_index // NUM_BOARDS][board_index % NUM_BOARDS][tile_data["row"] % ROWS][tile_data["col"] % COLS]
+            board_index = tile_data["board_row"] * NUM_BOARDS + tile_data["board_col"]
+            tile = boards[tile_data["board_row"]][tile_data["board_col"]][tile_data["row"]][tile_data["col"]]
             tile.active = tile_data["active"]
             tile.directory = tile_data["directory"]
             tile.image_filenames = tile_data["image_filenames"]
@@ -343,8 +345,15 @@ def draw_current_tile_info():
     board_text = font.render(board_label, True, BLACK)
     tile_text = font.render(tile_label, True, BLACK)
 
-    screen.blit(board_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 100))
-    screen.blit(tile_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 70))
+    screen.blit(board_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 700))
+    screen.blit(tile_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 670))
+
+def draw_file_list(current_tile):
+    font = pygame.font.Font(None, 24)
+    start_y = 730
+    for i, filename in enumerate(current_tile.image_filenames):
+        text_surface = font.render(filename, True, BLACK)
+        screen.blit(text_surface, (screen_width - SIDEBAR_WIDTH + 10, start_y + i * 30))
 
 # Setup pygame_gui manager
 manager = pygame_gui.UIManager((screen_width, screen_height))
@@ -380,6 +389,7 @@ delete_button = pygame_gui.elements.UIButton(
     manager=manager
 )
 
+
 clock = pygame.time.Clock()
 
 # Main game loop
@@ -406,6 +416,17 @@ while running:
                 move_player(forward=False)
             elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
                 rotate_player(event.key)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if edit_mode:
+                offset_x = screen_width - SIDEBAR_WIDTH + 10
+                offset_y = 60
+                board = get_current_board()
+                for row in board:
+                    for tile in row:
+                        adjusted_rect = tile.rect.move(offset_x, offset_y)
+                        if adjusted_rect.collidepoint(event.pos):
+                            tile.toggle_active()
+                            break
         elif event.type == pygame.USEREVENT:
             if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
                 if event.ui_element == edit_button:
