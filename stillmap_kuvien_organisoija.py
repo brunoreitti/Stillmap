@@ -5,7 +5,9 @@ from tkinter import filedialog, messagebox
 
 def organize_photos(input_directory):
     # Get all files in the input directory
-    files = sorted([f for f in os.listdir(input_directory) if os.path.isfile(os.path.join(input_directory, f))])
+    files = [f for f in os.listdir(input_directory) if os.path.isfile(os.path.join(input_directory, f))]
+    # Sort files by name (default file explorer sorting)
+    files.sort()
     
     # Create output directory if not exists
     output_directory = os.path.join(input_directory, "organized_photos")
