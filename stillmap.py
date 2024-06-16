@@ -5,6 +5,7 @@ import sys
 import os
 import json
 from tkinter import Tk, filedialog, simpledialog, messagebox
+from PIL import Image, ExifTags
 
 # Initialize Pygame and Pygame GUI
 pygame.init()
@@ -69,13 +70,31 @@ current_image_index = 0
 save_directory = "saved_game_states"
 os.makedirs(save_directory, exist_ok=True)
 
+def load_image_with_orientation(filepath):
+    image = Image.open(filepath)
+    try:
+        for orientation in ExifTags.TAGS.keys():
+            if ExifTags.TAGS[orientation] == 'Orientation':
+                break
+        exif = dict(image._getexif().items())
+        if exif[orientation] == 3:
+            image = image.rotate(180, expand=True)
+        elif exif[orientation] == 6:
+            image = image.rotate(270, expand=True)
+        elif exif[orientation] == 8:
+            image = image.rotate(90, expand=True)
+    except (AttributeError, KeyError, IndexError):
+        # cases: image don't have getexif
+        pass
+    return pygame.image.fromstring(image.tobytes(), image.size, image.mode)
+
 def load_images_from_directory(directory):
     images = []
     filenames = []
     for filename in os.listdir(directory):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
             filepath = os.path.join(directory, filename)
-            image = pygame.image.load(filepath)
+            image = load_image_with_orientation(filepath)
             images.append(image)
             filenames.append(filename)
     return images, filenames
@@ -464,8 +483,19 @@ while running:
     # Display the selected image if the current tile has images
     if current_tile.images:
         current_image = current_tile.images[current_image_index]
-        scaled_image = pygame.transform.scale(current_image, (image_display_area.width, image_display_area.height))
-        screen.blit(scaled_image, (image_display_area.x, image_display_area.y))
+        img_width, img_height = current_image.get_size()
+        
+        display_width, display_height = image_display_area.width, image_display_area.height
+
+        # Calculate scale factors and new dimensions
+        scale_factor = min(display_width / img_width, display_height / img_height)
+        new_width = int(img_width * scale_factor)
+        new_height = int(img_height * scale_factor)
+
+        scaled_image = pygame.transform.scale(current_image, (new_width, new_height))
+        image_rect = scaled_image.get_rect(center=image_display_area.center)
+        
+        screen.blit(scaled_image, image_rect.topleft)
 
     draw_current_tile_info()
     manager.draw_ui(screen)
