@@ -12,7 +12,10 @@ pygame.init()
 
 # Create a resizable Pygame window
 screen = pygame.display.set_mode((800, 600), pygame.RESIZABLE)
-pygame.display.set_caption("Checkerboard Game")
+pygame.display.set_caption("viewalk software")
+
+icon = pygame.image.load('viewalk.ico')
+pygame.display.set_icon(icon)
 
 # Get the handle of the Pygame window
 window_handle = pygame.display.get_wm_info()["window"]
@@ -48,6 +51,7 @@ BLUE = (0, 0, 255)
 MAIN_BG_COLOR = (50, 50, 50)
 SIDEBAR_BG_COLOR = (150, 150, 150)
 IMAGE_BG_COLOR = (100, 100, 100)
+ORANGE = (255, 189, 89)
 
 # Player's starting position in the center of the middle board
 player_pos = [ROWS // 2, COLS // 2]
@@ -160,7 +164,7 @@ def draw_board(mouse_pos, offset_x, offset_y):
 
 def draw_player(offset_x, offset_y):
     player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE).move(offset_x, offset_y)
-    pygame.draw.rect(screen, GREEN, player_rect)
+    pygame.draw.rect(screen, ORANGE, player_rect)
     
     # Draw direction arrow
     center_x = player_rect.centerx
@@ -168,21 +172,21 @@ def draw_player(offset_x, offset_y):
     arrow_length = SQUARE_SIZE // 2
     
     if player_direction == 0:  # Up
-        pygame.draw.polygon(screen, RED, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, DARK_GRAY, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
     elif player_direction == 1:  # Up-right
-        pygame.draw.polygon(screen, RED, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, DARK_GRAY, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
     elif player_direction == 2:  # Right
-        pygame.draw.polygon(screen, RED, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+        pygame.draw.polygon(screen, DARK_GRAY, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
     elif player_direction == 3:  # Down-right
-        pygame.draw.polygon(screen, RED, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, DARK_GRAY, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
     elif player_direction == 4:  # Down
-        pygame.draw.polygon(screen, RED, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, DARK_GRAY, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
     elif player_direction == 5:  # Down-left
-        pygame.draw.polygon(screen, RED, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
+        pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
     elif player_direction == 6:  # Left
-        pygame.draw.polygon(screen, RED, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+        pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
     elif player_direction == 7:  # Up-left
-        pygame.draw.polygon(screen, RED, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
+        pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
 
 
 def move_player(forward=True):
