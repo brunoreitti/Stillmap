@@ -5,6 +5,7 @@ import sys
 import os
 import json
 from tkinter import Tk, filedialog, simpledialog, messagebox
+from tkinter import messagebox as tk_messagebox
 from PIL import Image, ExifTags
 
 # Initialize Pygame and Pygame GUI
@@ -31,13 +32,33 @@ user32.ShowWindow(window_handle, SW_MAXIMIZE)
 
 # Get the screen dimensions after maximizing
 screen_width, screen_height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-
 # Constants
 BOARD_SIZE = 300  # Size of the board
 ROWS, COLS = 9, 9  # Size of the board
 SQUARE_SIZE = BOARD_SIZE // COLS  # Size of each square
 SIDEBAR_WIDTH = BOARD_SIZE + 20  # Width of the sidebar to house the board and button
 NUM_BOARDS = 3  # Number of 9x9 boards in each direction (3x3 grid)
+
+# Load the logo image
+logo = pygame.image.load('väännös1.jpg')  # Replace with the actual path to your logo image
+
+# Resize the logo to fit the sidebar
+logo_width, logo_height = logo.get_size()
+max_logo_width = SIDEBAR_WIDTH - 20  # Leave some padding on the sides
+max_logo_height = 200  # Set a maximum height for the logo
+
+# Calculate the scale factor to fit within the max dimensions
+scale_factor = min(max_logo_width / logo_width, max_logo_height / logo_height)
+new_logo_width = int(logo_width * scale_factor)
+new_logo_height = int(logo_height * scale_factor)
+resized_logo = pygame.transform.scale(logo, (new_logo_width, new_logo_height))
+
+# Calculate the position to center the logo in the sidebar
+logo_x = (SIDEBAR_WIDTH - new_logo_width) // 2
+# Adjust the y-coordinate to position the logo slightly higher
+logo_y = screen_height - new_logo_height - 110  # Adjust the 20 to move the logo up or down
+resized_logo = pygame.transform.scale(logo, (new_logo_width, new_logo_height))
+
 
 # Colors
 WHITE = (255, 255, 255)
@@ -62,6 +83,7 @@ current_board = [NUM_BOARDS // 2, NUM_BOARDS // 2]
 
 # Edit mode toggle
 edit_mode = False
+json_link_mode = False
 
 # Initialize Tkinter root and hide the main window
 root = Tk()
@@ -119,13 +141,17 @@ class Tile:
         self.directory = None
         self.images = []
         self.image_filenames = []
+        self.json_file = None  # New attribute to store the associated JSON file
 
     def draw(self, screen, mouse_pos, offset_x, offset_y):
         adjusted_rect = self.rect.move(offset_x, offset_y)
-        if adjusted_rect.collidepoint(mouse_pos) and edit_mode:
+        if adjusted_rect.collidepoint(mouse_pos) and (edit_mode or json_link_mode):
             self.color = LIGHT_GRAY
         else:
-            self.color = WHITE if self.active else DARK_GRAY
+            if self.json_file:
+                self.color = BLUE
+            else:
+                self.color = WHITE if self.active else DARK_GRAY
         pygame.draw.rect(screen, self.color, adjusted_rect)
         pygame.draw.rect(screen, BLACK, adjusted_rect, 1)
 
@@ -142,6 +168,46 @@ class Tile:
         self.directory = None
         self.images = []
         self.image_filenames = []
+
+    def set_json_file(self, json_file):
+        self.json_file = json_file
+
+class SidebarContainer:
+    def __init__(self, x, y, width, height, padding=10, offset=0):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.padding = padding
+        self.offset = offset
+        self.elements = []
+        self.total_height = 0
+
+    def add_element(self, element):
+        self.elements.append(element)
+        self.total_height += element.get_relative_rect().height + self.padding
+        self.reposition_elements()
+
+    def add_image(self, image, size):
+        self.elements.append((image, size))
+        self.total_height += size[1] + self.padding
+        self.reposition_elements()
+
+    def reposition_elements(self):
+        current_y = self.y + self.height - self.padding - self.offset
+        for element in reversed(self.elements):
+            if isinstance(element, tuple):
+                # It's an image
+                image, size = element
+                image_rect = image.get_rect()
+                image_rect.topleft = (self.x + (self.width - size[0]) // 2, current_y - size[1])
+                screen.blit(image, image_rect)
+                current_y -= size[1] + self.padding
+            else:
+                rect = element.get_relative_rect()
+                rect.topleft = (self.x + self.padding, current_y - rect.height)
+                element.set_relative_position((self.x + self.padding, current_y - rect.height))
+                current_y -= rect.height + self.padding
 
 # Create the board with Tile objects for each 9x9 grid in the 3x3 grid
 boards = [[[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS)] for _ in range(NUM_BOARDS)]
@@ -187,7 +253,6 @@ def draw_player(offset_x, offset_y):
         pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
     elif player_direction == 7:  # Up-left
         pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
-
 
 def move_player(forward=True):
     global current_board
@@ -255,7 +320,16 @@ def move_player(forward=True):
             print("Cannot move to inactive tile.")
     else:
         if get_current_board()[new_pos[0]][new_pos[1]].active:
-            player_pos[:] = new_pos
+            # Check if the tile has a JSON link
+            if get_current_board()[new_pos[0]][new_pos[1]].json_file:
+                response = tk_messagebox.askyesno("Trigger JSON Link", "Do you want to trigger the linked JSON file?")
+                if response:
+                    load_game_state_from_file(get_current_board()[new_pos[0]][new_pos[1]].json_file)
+                    return  # Prevent movement to the tile after loading the new game state
+                else:
+                    return  # Prevent movement to the tile
+            else:
+                player_pos[:] = new_pos
             print(f"Moved to position: {new_pos}")
         else:
             print("Cannot move to inactive tile.")
@@ -273,6 +347,11 @@ def toggle_edit_mode():
     global edit_mode
     edit_mode = not edit_mode
     edit_button.set_text(f"Edit Mode: {'ON' if edit_mode else 'OFF'}")
+
+def toggle_json_link_mode():
+    global json_link_mode
+    json_link_mode = not json_link_mode
+    json_link_button.set_text(f"JSON Link Mode: {'ON' if json_link_mode else 'OFF'}")
 
 def remove_current_tile_folder():
     current_tile = get_current_tile()
@@ -305,7 +384,8 @@ def save_game_state():
                         "board_col": board_row.index(board),
                         "active": tile.active,
                         "directory": tile.directory,
-                        "image_filenames": tile.image_filenames
+                        "image_filenames": tile.image_filenames,
+                        "json_file": tile.json_file
                     }
                     game_state["tiles"].append(tile_data)
 
@@ -328,6 +408,9 @@ def load_game_state():
     if not selected_file:
         return
 
+    load_game_state_from_file(selected_file)
+
+def load_game_state_from_file(filepath):
     global player_pos, player_direction, current_board, current_image_index
 
     # Clear the current game state
@@ -339,7 +422,7 @@ def load_game_state():
                     tile.clear_directory()
 
     try:
-        with open(selected_file, "r") as file:
+        with open(filepath, "r") as file:
             game_state = json.load(file)
         
         player_pos = game_state["player_position"]
@@ -347,11 +430,12 @@ def load_game_state():
         current_board = game_state["current_board"]
 
         for tile_data in game_state["tiles"]:
-            board_index = tile_data["board_row"] * NUM_BOARDS + tile_data["board_col"]
-            tile = boards[tile_data["board_row"]][tile_data["board_col"]][tile_data["row"]][tile_data["col"]]
+            board_index = tile_data.get("board_row", 0) * NUM_BOARDS + tile_data.get("board_col", 0)
+            tile = boards[tile_data.get("board_row", 0)][tile_data.get("board_col", 0)][tile_data["row"]][tile_data["col"]]
             tile.active = tile_data["active"]
             tile.directory = tile_data["directory"]
             tile.image_filenames = tile_data["image_filenames"]
+            tile.json_file = tile_data.get("json_file")  # Handle potential missing key
             if tile_data["directory"]:
                 tile.images, _ = load_images_from_directory(tile_data["directory"])
                 
@@ -381,37 +465,60 @@ def draw_file_list(current_tile):
 # Setup pygame_gui manager
 manager = pygame_gui.UIManager((screen_width, screen_height))
 
+# Create SidebarContainer with offset to raise elements higher
+sidebar_container = SidebarContainer(
+    x=screen_width - SIDEBAR_WIDTH,
+    y=0,
+    width=SIDEBAR_WIDTH,
+    height=screen_height,
+    offset=125  # Raise the elements by 125 pixels
+)
+
 # Create GUI buttons
 edit_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, 10), (SIDEBAR_WIDTH - 20, 40)),
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
     text="Edit Mode: OFF",
     manager=manager
 )
+sidebar_container.add_element(edit_button)
+
+json_link_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="JSON Link Mode: OFF",
+    manager=manager
+)
+sidebar_container.add_element(json_link_button)
 
 image_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) - 60), (SIDEBAR_WIDTH - 20, 40)),
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
     text="Select Folder",
     manager=manager
 )
+sidebar_container.add_element(image_button)
 
 save_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2)), (SIDEBAR_WIDTH - 20, 40)),
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
     text="Save Game",
     manager=manager
 )
+sidebar_container.add_element(save_button)
 
 load_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 60), (SIDEBAR_WIDTH - 20, 40)),
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
     text="Load Game",
     manager=manager
 )
+sidebar_container.add_element(load_button)
 
 delete_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 120), (SIDEBAR_WIDTH - 20, 40)),
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
     text="Remove Folder",
     manager=manager
 )
+sidebar_container.add_element(delete_button)
 
+# Add logo to the sidebar
+sidebar_container.add_image(resized_logo, (new_logo_width, new_logo_height))
 
 clock = pygame.time.Clock()
 
@@ -433,6 +540,8 @@ while running:
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_e:  # Toggle edit mode with 'E' key
                 toggle_edit_mode()
+            elif event.key == pygame.K_j:  # Toggle JSON link mode with 'J' key
+                toggle_json_link_mode()
             elif event.key == pygame.K_UP:
                 move_player(forward=True)
             elif event.key == pygame.K_DOWN:
@@ -440,20 +549,30 @@ while running:
             elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
                 rotate_player(event.key)
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if edit_mode:
-                offset_x = screen_width - SIDEBAR_WIDTH + 10
-                offset_y = 60
-                board = get_current_board()
-                for row in board:
-                    for tile in row:
-                        adjusted_rect = tile.rect.move(offset_x, offset_y)
-                        if adjusted_rect.collidepoint(event.pos):
+            offset_x = screen_width - SIDEBAR_WIDTH + 10
+            offset_y = 60
+            board = get_current_board()
+            for row in board:
+                for tile in row:
+                    adjusted_rect = tile.rect.move(offset_x, offset_y)
+                    if adjusted_rect.collidepoint(event.pos):
+                        if edit_mode:
                             tile.toggle_active()
-                            break
+                        elif json_link_mode:
+                            selected_file = filedialog.askopenfilename(
+                                title="Select a JSON file",
+                                initialdir=save_directory,
+                                filetypes=[("JSON files", "*.json")]
+                            )
+                            if selected_file:
+                                tile.set_json_file(selected_file)
+                        break
         elif event.type == pygame.USEREVENT:
             if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
                 if event.ui_element == edit_button:
                     toggle_edit_mode()
+                elif event.ui_element == json_link_button:
+                    toggle_json_link_mode()
                 elif event.ui_element == image_button:
                     directory = open_file_explorer()
                     if directory:
@@ -502,6 +621,9 @@ while running:
         screen.blit(scaled_image, image_rect.topleft)
 
     draw_current_tile_info()
+
+    sidebar_container.reposition_elements()
+
     manager.draw_ui(screen)
 
     pygame.display.flip()
