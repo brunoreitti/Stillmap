@@ -59,7 +59,6 @@ logo_x = (SIDEBAR_WIDTH - new_logo_width) // 2
 logo_y = screen_height - new_logo_height - 110  # Adjust the 20 to move the logo up or down
 resized_logo = pygame.transform.scale(logo, (new_logo_width, new_logo_height))
 
-
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -96,6 +95,10 @@ current_image_index = 0
 save_directory = "saved_game_states"
 os.makedirs(save_directory, exist_ok=True)
 
+def open_file_explorer():
+    directory = filedialog.askdirectory()
+    return directory
+
 def load_image_with_orientation(filepath):
     image = Image.open(filepath)
     try:
@@ -114,20 +117,12 @@ def load_image_with_orientation(filepath):
         pass
     return pygame.image.fromstring(image.tobytes(), image.size, image.mode)
 
-def load_images_from_directory(directory):
-    images = []
-    filenames = []
-    for filename in os.listdir(directory):
-        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-            filepath = os.path.join(directory, filename)
-            image = load_image_with_orientation(filepath)
-            images.append(image)
-            filenames.append(filename)
-    return images, filenames
-
-def open_file_explorer():
-    directory = filedialog.askdirectory()
-    return directory
+def load_image(filepath):
+    try:
+        return load_image_with_orientation(filepath)
+    except Exception as e:
+        print(f"Failed to load image {filepath}: {e}")
+        return None
 
 class Tile:
     def __init__(self, row, col, size):
@@ -137,9 +132,7 @@ class Tile:
         self.rect = pygame.Rect(col * size, row * size, size, size)
         self.color = WHITE
         self.active = True  # Tile is active (can be moved to)
-        self.image = None
         self.directory = None
-        self.images = []
         self.image_filenames = []
         self.json_file = None  # New attribute to store the associated JSON file
 
@@ -162,15 +155,20 @@ class Tile:
     def set_directory(self, directory):
         self.directory = directory
         if directory:
-            self.images, self.image_filenames = load_images_from_directory(directory)
+            self.image_filenames = [f for f in os.listdir(directory) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
 
     def clear_directory(self):
         self.directory = None
-        self.images = []
         self.image_filenames = []
 
     def set_json_file(self, json_file):
         self.json_file = json_file
+
+    def get_current_image(self, index):
+        if not self.directory or index >= len(self.image_filenames):
+            return None
+        filepath = os.path.join(self.directory, self.image_filenames[index])
+        return load_image(filepath)
 
 class SidebarContainer:
     def __init__(self, x, y, width, height, padding=10, offset=0):
@@ -338,10 +336,10 @@ def rotate_player(key):
     global player_direction, current_image_index
     if key == pygame.K_LEFT:
         player_direction = (player_direction - 1) % 8
-        current_image_index = (current_image_index - 1) % len(get_current_tile().images) if get_current_tile().images else 0
+        current_image_index = (current_image_index - 1) % len(get_current_tile().image_filenames) if get_current_tile().image_filenames else 0
     elif key == pygame.K_RIGHT:
         player_direction = (player_direction + 1) % 8
-        current_image_index = (current_image_index + 1) % len(get_current_tile().images) if get_current_tile().images else 0
+        current_image_index = (current_image_index + 1) % len(get_current_tile().image_filenames) if get_current_tile().image_filenames else 0
 
 def toggle_edit_mode():
     global edit_mode
@@ -436,8 +434,6 @@ def load_game_state_from_file(filepath):
             tile.directory = tile_data["directory"]
             tile.image_filenames = tile_data["image_filenames"]
             tile.json_file = tile_data.get("json_file")  # Handle potential missing key
-            if tile_data["directory"]:
-                tile.images, _ = load_images_from_directory(tile_data["directory"])
                 
         current_image_index = 0
         print("Game state loaded.")
@@ -604,21 +600,22 @@ while running:
     pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
 
     # Display the selected image if the current tile has images
-    if current_tile.images:
-        current_image = current_tile.images[current_image_index]
-        img_width, img_height = current_image.get_size()
-        
-        display_width, display_height = image_display_area.width, image_display_area.height
+    if current_tile.image_filenames:
+        current_image = current_tile.get_current_image(current_image_index)
+        if current_image:
+            img_width, img_height = current_image.get_size()
+            
+            display_width, display_height = image_display_area.width, image_display_area.height
 
-        # Calculate scale factors and new dimensions
-        scale_factor = min(display_width / img_width, display_height / img_height)
-        new_width = int(img_width * scale_factor)
-        new_height = int(img_height * scale_factor)
+            # Calculate scale factors and new dimensions
+            scale_factor = min(display_width / img_width, display_height / img_height)
+            new_width = int(img_width * scale_factor)
+            new_height = int(img_height * scale_factor)
 
-        scaled_image = pygame.transform.scale(current_image, (new_width, new_height))
-        image_rect = scaled_image.get_rect(center=image_display_area.center)
-        
-        screen.blit(scaled_image, image_rect.topleft)
+            scaled_image = pygame.transform.scale(current_image, (new_width, new_height))
+            image_rect = scaled_image.get_rect(center=image_display_area.center)
+            
+            screen.blit(scaled_image, image_rect.topleft)
 
     draw_current_tile_info()
 
