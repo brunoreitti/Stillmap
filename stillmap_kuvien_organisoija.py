@@ -2,12 +2,31 @@ import os
 import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from PIL import Image
+
+def resize_image(input_path, output_path, target_width, target_height):
+    with Image.open(input_path) as img:
+        img_ratio = img.width / img.height
+        target_ratio = target_width / target_height
+
+        if img_ratio > target_ratio:
+            # Image is wider than target aspect ratio
+            new_width = target_width
+            new_height = int(target_width / img_ratio)
+        else:
+            # Image is taller than target aspect ratio
+            new_height = target_height
+            new_width = int(target_height * img_ratio)
+
+        resized_img = img.resize((new_width, new_height), Image.LANCZOS)
+        resized_img.save(output_path)
 
 def organize_photos(input_directory):
-    # Get all files in the input directory
-    files = [f for f in os.listdir(input_directory) if os.path.isfile(os.path.join(input_directory, f))]
-    # Sort files by name (default file explorer sorting)
-    files.sort()
+    # Get all files in the input directory along with their creation dates
+    files = [(f, os.path.getctime(os.path.join(input_directory, f))) for f in os.listdir(input_directory) if os.path.isfile(os.path.join(input_directory, f))]
+    # Sort files by creation date
+    files.sort(key=lambda x: x[1])
+    sorted_files = [f[0] for f in files]
     
     # Create output directory if not exists
     output_directory = os.path.join(input_directory, "organized_photos")
@@ -16,20 +35,20 @@ def organize_photos(input_directory):
 
     # Process files in batches of 8
     batch_size = 8
-    for i in range(0, len(files), batch_size):
+    for i in range(0, len(sorted_files), batch_size):
         # Create a new folder for each batch
         folder_name = str((i // batch_size) + 1)
         new_folder_path = os.path.join(output_directory, folder_name)
         os.makedirs(new_folder_path, exist_ok=True)
         
-        # Rename and move files into the new folder
+        # Rename, resize and move files into the new folder
         for j in range(batch_size):
-            if i + j < len(files):
-                src_file = os.path.join(input_directory, files[i + j])
+            if i + j < len(sorted_files):
+                src_file = os.path.join(input_directory, sorted_files[i + j])
                 dst_file = os.path.join(new_folder_path, f"{j + 1}.jpg")
-                shutil.copy(src_file, dst_file)
+                resize_image(src_file, dst_file, 1920, 1080)
 
-    messagebox.showinfo("Success", f"Photos organized into folders in: {output_directory}")
+    messagebox.showinfo("Success", f"Photos organized and resized into folders in: {output_directory}")
 
 def select_directory():
     input_directory = filedialog.askdirectory()
