@@ -2,10 +2,24 @@ import os
 import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from PIL import Image
+from PIL import Image, ExifTags
 
 def resize_image(input_path, output_path, target_width, target_height):
     with Image.open(input_path) as img:
+        # Correct orientation based on EXIF data
+        for orientation in ExifTags.TAGS.keys():
+            if ExifTags.TAGS[orientation] == 'Orientation':
+                break
+        exif = img._getexif()
+        if exif is not None:
+            orientation = exif.get(orientation, 1)
+            if orientation == 3:
+                img = img.rotate(180, expand=True)
+            elif orientation == 6:
+                img = img.rotate(270, expand=True)
+            elif orientation == 8:
+                img = img.rotate(90, expand=True)
+
         img_ratio = img.width / img.height
         target_ratio = target_width / target_height
 
