@@ -6,7 +6,8 @@ import os
 import json
 from tkinter import Tk, filedialog, simpledialog, messagebox
 from tkinter import messagebox as tk_messagebox
-from PIL import Image, ExifTags
+import cv2
+import numpy as np
 
 # Initialize Pygame and Pygame GUI
 pygame.init()
@@ -100,22 +101,26 @@ def open_file_explorer():
     return directory
 
 def load_image_with_orientation(filepath):
-    image = Image.open(filepath)
+    image = cv2.imread(filepath)
+    if image is None:
+        raise ValueError("Image not found or unable to load")
     try:
-        for orientation in ExifTags.TAGS.keys():
-            if ExifTags.TAGS[orientation] == 'Orientation':
-                break
-        exif = dict(image._getexif().items())
-        if exif[orientation] == 3:
-            image = image.rotate(180, expand=True)
-        elif exif[orientation] == 6:
-            image = image.rotate(270, expand=True)
-        elif exif[orientation] == 8:
-            image = image.rotate(90, expand=True)
-    except (AttributeError, KeyError, IndexError):
-        # cases: image don't have getexif
-        pass
-    return pygame.image.fromstring(image.tobytes(), image.size, image.mode)
+        image_exif = cv2.imread(filepath, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+        if image_exif is None:
+            raise ValueError("Image not found or unable to load with EXIF")
+        exif_orientation_tag = 274
+        if hasattr(image_exif, 'EXIF'):
+            exif = dict(image_exif.EXIF.items())
+            orientation = exif.get(exif_orientation_tag)
+            if orientation == 3:
+                image = cv2.rotate(image, cv2.ROTATE_180)
+            elif orientation == 6:
+                image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+            elif orientation == 8:
+                image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    except Exception as e:
+        print(f"EXIF orientation handling failed: {e}")
+    return image
 
 def load_image(filepath):
     try:
@@ -123,6 +128,11 @@ def load_image(filepath):
     except Exception as e:
         print(f"Failed to load image {filepath}: {e}")
         return None
+
+def cv2_to_pygame(image):
+    """Convert an OpenCV image to a Pygame surface."""
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    return pygame.image.frombuffer(image_rgb.tostring(), image_rgb.shape[1::-1], 'RGB')
 
 class Tile:
     def __init__(self, row, col, size):
@@ -168,7 +178,10 @@ class Tile:
         if not self.directory or index >= len(self.image_filenames):
             return None
         filepath = os.path.join(self.directory, self.image_filenames[index])
-        return load_image(filepath)
+        image = load_image(filepath)
+        if image is not None:
+            return image
+        return None
 
 class SidebarContainer:
     def __init__(self, x, y, width, height, padding=10, offset=0):
@@ -602,8 +615,8 @@ while running:
     # Display the selected image if the current tile has images
     if current_tile.image_filenames:
         current_image = current_tile.get_current_image(current_image_index)
-        if current_image:
-            img_width, img_height = current_image.get_size()
+        if current_image is not None:
+            img_height, img_width = current_image.shape[:2]
             
             display_width, display_height = image_display_area.width, image_display_area.height
 
@@ -612,10 +625,11 @@ while running:
             new_width = int(img_width * scale_factor)
             new_height = int(img_height * scale_factor)
 
-            scaled_image = pygame.transform.scale(current_image, (new_width, new_height))
-            image_rect = scaled_image.get_rect(center=image_display_area.center)
+            scaled_image = cv2.resize(current_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            scaled_image_pygame = cv2_to_pygame(scaled_image)
+            image_rect = scaled_image_pygame.get_rect(center=image_display_area.center)
             
-            screen.blit(scaled_image, image_rect.topleft)
+            screen.blit(scaled_image_pygame, image_rect.topleft)
 
     draw_current_tile_info()
 
