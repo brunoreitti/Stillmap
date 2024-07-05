@@ -3,6 +3,20 @@ import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ExifTags
+from datetime import datetime
+
+def get_image_date(image_path):
+    try:
+        with Image.open(image_path) as img:
+            exif = img._getexif()
+            if exif is not None:
+                for tag, value in exif.items():
+                    decoded = ExifTags.TAGS.get(tag, tag)
+                    if decoded == "DateTimeOriginal":
+                        return datetime.strptime(value, '%Y:%m:%d %H:%M:%S')
+    except Exception as e:
+        print(f"Error reading EXIF data: {e}")
+    return None
 
 def resize_image(input_path, output_path, target_width, target_height):
     with Image.open(input_path) as img:
@@ -37,8 +51,22 @@ def resize_image(input_path, output_path, target_width, target_height):
 
 def organize_photos(input_directory):
     # Get all files in the input directory along with their creation dates
-    files = [(f, os.path.getctime(os.path.join(input_directory, f))) for f in os.listdir(input_directory) if os.path.isfile(os.path.join(input_directory, f))]
-    # Sort files by creation date
+    files = []
+    for f in os.listdir(input_directory):
+        file_path = os.path.join(input_directory, f)
+        if os.path.isfile(file_path):
+            # Try to get the EXIF date
+            exif_date = get_image_date(file_path)
+            if exif_date:
+                files.append((f, exif_date.timestamp()))
+            else:
+                # Fall back to file system dates
+                creation_date = os.path.getctime(file_path)
+                modification_date = os.path.getmtime(file_path)
+                # Use the earliest date available
+                files.append((f, min(creation_date, modification_date)))
+
+    # Sort files by date
     files.sort(key=lambda x: x[1])
     sorted_files = [f[0] for f in files]
     
