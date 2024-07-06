@@ -5,7 +5,6 @@ import sys
 import os
 import json
 from tkinter import Tk, filedialog, simpledialog, messagebox
-from tkinter import messagebox as tk_messagebox
 import cv2
 import numpy as np
 
@@ -33,32 +32,17 @@ user32.ShowWindow(window_handle, SW_MAXIMIZE)
 
 # Get the screen dimensions after maximizing
 screen_width, screen_height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+
+# Bring window to the foreground
+def bring_window_to_front():
+    user32.SetForegroundWindow(window_handle)
+
 # Constants
 BOARD_SIZE = 300  # Size of the board
 ROWS, COLS = 9, 9  # Size of the board
 SQUARE_SIZE = BOARD_SIZE // COLS  # Size of each square
 SIDEBAR_WIDTH = BOARD_SIZE + 20  # Width of the sidebar to house the board and button
 NUM_BOARDS = 3  # Number of 9x9 boards in each direction (3x3 grid)
-
-# Load the logo image
-logo = pygame.image.load('väännös1.jpg')  # Replace with the actual path to your logo image
-
-# Resize the logo to fit the sidebar
-logo_width, logo_height = logo.get_size()
-max_logo_width = SIDEBAR_WIDTH - 20  # Leave some padding on the sides
-max_logo_height = 200  # Set a maximum height for the logo
-
-# Calculate the scale factor to fit within the max dimensions
-scale_factor = min(max_logo_width / logo_width, max_logo_height / logo_height)
-new_logo_width = int(logo_width * scale_factor)
-new_logo_height = int(logo_height * scale_factor)
-resized_logo = pygame.transform.scale(logo, (new_logo_width, new_logo_height))
-
-# Calculate the position to center the logo in the sidebar
-logo_x = (SIDEBAR_WIDTH - new_logo_width) // 2
-# Adjust the y-coordinate to position the logo slightly higher
-logo_y = screen_height - new_logo_height - 110  # Adjust the 20 to move the logo up or down
-resized_logo = pygame.transform.scale(logo, (new_logo_width, new_logo_height))
 
 # Colors
 WHITE = (255, 255, 255)
@@ -132,7 +116,7 @@ def load_image(filepath):
 def cv2_to_pygame(image):
     """Convert an OpenCV image to a Pygame surface."""
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    return pygame.image.frombuffer(image_rgb.tostring(), image_rgb.shape[1::-1], 'RGB')
+    return pygame.image.frombuffer(image_rgb.tobytes(), image_rgb.shape[1::-1], 'RGB')
 
 class Tile:
     def __init__(self, row, col, size):
@@ -145,6 +129,7 @@ class Tile:
         self.directory = None
         self.image_filenames = []
         self.json_file = None  # New attribute to store the associated JSON file
+        self.text_content = ""  # New attribute to store the text content
 
     def draw(self, screen, mouse_pos, offset_x, offset_y):
         adjusted_rect = self.rect.move(offset_x, offset_y)
@@ -183,6 +168,16 @@ class Tile:
             return image
         return None
 
+    def get_json_text(self):
+        if self.json_file:
+            try:
+                with open(self.json_file, 'r') as file:
+                    data = json.load(file)
+                    return json.dumps(data, indent=2)
+            except Exception as e:
+                return f"Error loading JSON: {e}"
+        return "No JSON linked."
+
 class SidebarContainer:
     def __init__(self, x, y, width, height, padding=10, offset=0):
         self.x = x
@@ -199,26 +194,13 @@ class SidebarContainer:
         self.total_height += element.get_relative_rect().height + self.padding
         self.reposition_elements()
 
-    def add_image(self, image, size):
-        self.elements.append((image, size))
-        self.total_height += size[1] + self.padding
-        self.reposition_elements()
-
     def reposition_elements(self):
         current_y = self.y + self.height - self.padding - self.offset
         for element in reversed(self.elements):
-            if isinstance(element, tuple):
-                # It's an image
-                image, size = element
-                image_rect = image.get_rect()
-                image_rect.topleft = (self.x + (self.width - size[0]) // 2, current_y - size[1])
-                screen.blit(image, image_rect)
-                current_y -= size[1] + self.padding
-            else:
-                rect = element.get_relative_rect()
-                rect.topleft = (self.x + self.padding, current_y - rect.height)
-                element.set_relative_position((self.x + self.padding, current_y - rect.height))
-                current_y -= rect.height + self.padding
+            rect = element.get_relative_rect()
+            rect.topleft = (self.x + self.padding, current_y - rect.height)
+            element.set_relative_position((self.x + self.padding, current_y - rect.height))
+            current_y -= rect.height + self.padding
 
 # Create the board with Tile objects for each 9x9 grid in the 3x3 grid
 boards = [[[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS)] for _ in range(NUM_BOARDS)]
@@ -326,6 +308,7 @@ def move_player(forward=True):
         if get_board(new_board[0] * NUM_BOARDS + new_board[1])[new_pos[0]][new_pos[1]].active:
             current_board[:] = new_board
             player_pos[:] = new_pos
+            update_message_box()  # Update the message box when player moves to a new board
             print(f"Moved to new board: {new_board}, new position: {new_pos}")
         else:
             print("Cannot move to inactive tile.")
@@ -333,14 +316,16 @@ def move_player(forward=True):
         if get_current_board()[new_pos[0]][new_pos[1]].active:
             # Check if the tile has a JSON link
             if get_current_board()[new_pos[0]][new_pos[1]].json_file:
-                response = tk_messagebox.askyesno("Trigger JSON Link", "Do you want to trigger the linked JSON file?")
+                response = messagebox.askyesno("Trigger JSON Link", "Do you want to trigger the linked JSON file?")
                 if response:
                     load_game_state_from_file(get_current_board()[new_pos[0]][new_pos[1]].json_file)
+                    bring_window_to_front()  # Ensure window is brought to the front after loading
                     return  # Prevent movement to the tile after loading the new game state
                 else:
                     return  # Prevent movement to the tile
             else:
                 player_pos[:] = new_pos
+            update_message_box()  # Update the message box when player moves to a new tile
             print(f"Moved to position: {new_pos}")
         else:
             print("Cannot move to inactive tile.")
@@ -364,9 +349,17 @@ def toggle_json_link_mode():
     json_link_mode = not json_link_mode
     json_link_button.set_text(f"JSON Link Mode: {'ON' if json_link_mode else 'OFF'}")
 
+def edit_text():
+    current_tile = get_current_tile()
+    new_text = simpledialog.askstring("Edit Text", "Enter new text:", initialvalue=current_tile.text_content)
+    if new_text is not None:
+        current_tile.text_content = new_text
+        update_message_box()  # Update the message box with the new text
+
 def remove_current_tile_folder():
     current_tile = get_current_tile()
     current_tile.clear_directory()
+    update_message_box()  # Update the message box after removing the folder
     print(f"Removed folder association from the current tile.")
 
 # Functions to save and load the game state
@@ -396,7 +389,8 @@ def save_game_state():
                         "active": tile.active,
                         "directory": tile.directory,
                         "image_filenames": tile.image_filenames,
-                        "json_file": tile.json_file
+                        "json_file": tile.json_file,
+                        "text_content": tile.text_content  # Include text content in the save
                     }
                     game_state["tiles"].append(tile_data)
 
@@ -420,6 +414,7 @@ def load_game_state():
         return
 
     load_game_state_from_file(selected_file)
+    bring_window_to_front()  # Ensure window is brought to the front after loading
 
 def load_game_state_from_file(filepath):
     global player_pos, player_direction, current_board, current_image_index
@@ -447,8 +442,10 @@ def load_game_state_from_file(filepath):
             tile.directory = tile_data["directory"]
             tile.image_filenames = tile_data["image_filenames"]
             tile.json_file = tile_data.get("json_file")  # Handle potential missing key
+            tile.text_content = tile_data.get("text_content", "")  # Load text content
                 
         current_image_index = 0
+        update_message_box()  # Update the message box after loading the game state
         print("Game state loaded.")
     except FileNotFoundError:
         print("No saved game state found.")
@@ -464,12 +461,9 @@ def draw_current_tile_info():
     screen.blit(board_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 700))
     screen.blit(tile_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 670))
 
-def draw_file_list(current_tile):
-    font = pygame.font.Font(None, 24)
-    start_y = 730
-    for i, filename in enumerate(current_tile.image_filenames):
-        text_surface = font.render(filename, True, BLACK)
-        screen.blit(text_surface, (screen_width - SIDEBAR_WIDTH + 10, start_y + i * 30))
+def update_message_box():
+    current_tile = get_current_tile()
+    message_box.set_text(current_tile.text_content)
 
 # Setup pygame_gui manager
 manager = pygame_gui.UIManager((screen_width, screen_height))
@@ -526,8 +520,26 @@ delete_button = pygame_gui.elements.UIButton(
 )
 sidebar_container.add_element(delete_button)
 
-# Add logo to the sidebar
-sidebar_container.add_image(resized_logo, (new_logo_width, new_logo_height))
+# Add a scrollable text area to display text content
+message_box_panel = pygame_gui.elements.UIPanel(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 100)),  # Adjust the height as needed
+    manager=manager
+)
+message_box = pygame_gui.elements.UITextBox(
+    html_text="",
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 100)),  # Adjust the height and width as needed
+    container=message_box_panel,
+    manager=manager
+)
+sidebar_container.add_element(message_box_panel)
+
+# Add a button to edit text
+edit_text_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="Edit Text",
+    manager=manager
+)
+sidebar_container.add_element(edit_text_button)
 
 clock = pygame.time.Clock()
 
@@ -588,13 +600,16 @@ while running:
                         current_tile = get_current_tile()
                         current_tile.set_directory(directory)
                         current_image_index = 0  # Reset image index when a new folder is assigned
+                        bring_window_to_front()  # Ensure window is brought to the front after loading
                 elif event.ui_element == save_button:
                     save_game_state()
                 elif event.ui_element == load_button:
                     load_game_state()
                 elif event.ui_element == delete_button:
                     remove_current_tile_folder()
-        
+                elif event.ui_element == edit_text_button:
+                    edit_text()
+
         manager.process_events(event)
 
     manager.update(time_delta)
@@ -605,8 +620,6 @@ while running:
     draw_board(mouse_pos, offset_x, offset_y)
     draw_player(offset_x, offset_y)
     current_tile = get_current_tile()
-    if current_tile.directory:
-        draw_file_list(current_tile)
 
     # Draw the image display area
     image_display_area = pygame.Rect(10, 10, screen_width - SIDEBAR_WIDTH - 20, screen_height - 20)
