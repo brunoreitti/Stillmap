@@ -463,7 +463,8 @@ def draw_current_tile_info():
 
 def update_message_box():
     current_tile = get_current_tile()
-    message_box.set_text(current_tile.text_content)
+    message_box.html_text = f"<font color='#000000'>{current_tile.text_content}</font>"  # Ensure text is black
+    message_box.rebuild()  # Rebuild to apply changes
 
 # Setup pygame_gui manager
 manager = pygame_gui.UIManager((screen_width, screen_height))
@@ -522,21 +523,27 @@ sidebar_container.add_element(delete_button)
 
 # Add a scrollable text area to display text content
 message_box_panel = pygame_gui.elements.UIPanel(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 100)),  # Adjust the height as needed
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 120)),  # Adjust the height and width as needed
     manager=manager
 )
+message_box_panel.background_colour = pygame.Color("#FFFFFF")  # Set the background color to white
+
 message_box = pygame_gui.elements.UITextBox(
-    html_text="",
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 100)),  # Adjust the height and width as needed
+    html_text="<font color='#D3D3D3'>no text discription in image image</font>",  # Set initial text color to black
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 120)),  # Adjust the height and width as needed
     container=message_box_panel,
-    manager=manager
+    manager=manager,
+    object_id="#message_box"
 )
+message_box.background_colour = pygame.Color("#FFFFFF")  # Set the background color to white
+message_box.text_colour = pygame.Color("#000000")  # Set the text color to black
+message_box.rebuild()  # Ensure the text box is rebuilt with the new settings
 sidebar_container.add_element(message_box_panel)
 
 # Add a button to edit text
 edit_text_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Edit Text",
+    text="Edit current image discriptions",
     manager=manager
 )
 sidebar_container.add_element(edit_text_button)
