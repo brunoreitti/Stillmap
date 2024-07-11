@@ -300,8 +300,6 @@ def move_player(forward=True):
         if current_board[1] < NUM_BOARDS - 1:
             new_pos[1] = 0
             new_board[1] += 1
-        else:
-            new_pos[1] = COLS - 1
 
     # Check if the new position is in an active tile
     if new_board != current_board:
@@ -361,58 +359,6 @@ def remove_current_tile_folder():
     current_tile.clear_directory()
     update_message_box()  # Update the message box after removing the folder
     print(f"Removed folder association from the current tile.")
-
-def create_link(tile):
-    selected_file = filedialog.askopenfilename(
-        title="Select a JSON file to link",
-        initialdir=save_directory,
-        filetypes=[("JSON files", "*.json")]
-    )
-    if selected_file:
-        tile.set_json_file(selected_file)
-        tile.color = BLUE
-
-def delete_link(tile):
-    tile.set_json_file(None)
-    tile.color = WHITE if tile.active else DARK_GRAY
-
-def add_empty_link(tile):
-    empty_link_file = os.path.join(save_directory, "empty_link.json")
-    if not os.path.exists(empty_link_file):
-        with open(empty_link_file, "w") as file:
-            json.dump({}, file)
-    tile.set_json_file(empty_link_file)
-    tile.color = BLUE
-
-def show_link_popup(tile):
-    global popup_open, popup_elements, popup_tile
-    if popup_open:
-        return
-    popup_open = True
-    popup_tile = tile  # Ensure the tile is set
-
-    popup_rect = pygame.Rect(screen_width//2 - 100, screen_height//2 - 75, 200, 150)
-    
-    add_link_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((popup_rect.x + 10, popup_rect.y + 10), (180, 30)),
-        text="Add Link",
-        manager=manager,
-        object_id="#add_link_button"
-    )
-    delete_link_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((popup_rect.x + 10, popup_rect.y + 50), (180, 30)),
-        text="Delete Link",
-        manager=manager,
-        object_id="#delete_link_button"
-    )
-    add_empty_link_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((popup_rect.x + 10, popup_rect.y + 90), (180, 30)),
-        text="Add Empty Link",
-        manager=manager,
-        object_id="#add_empty_link_button"
-    )
-
-    popup_elements = [add_link_button, delete_link_button, add_empty_link_button]
 
 # Functions to save and load the game state
 def save_game_state():
@@ -502,16 +448,17 @@ def load_game_state_from_file(filepath):
     except FileNotFoundError:
         print("No saved game state found.")
 
-def draw_current_tile_info():
-    font = pygame.font.Font(None, 24)
-    board_label = f"Board: ({current_board[0]}, {current_board[1]})"
-    tile_label = f"Tile: ({player_pos[0]}, {player_pos[1]})"
-
-    board_text = font.render(board_label, True, BLACK)
-    tile_text = font.render(tile_label, True, BLACK)
-
-    screen.blit(board_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 700))
-    screen.blit(tile_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 670))
+# Remove the draw_current_tile_info function call from the main game loop
+# def draw_current_tile_info():
+#     font = pygame.font.Font(None, 24)
+#     board_label = f"Board: ({current_board[0]}, {current_board[1]})"
+#     tile_label = f"Tile: ({player_pos[0]}, {player_pos[1]})"
+# 
+#     board_text = font.render(board_label, True, BLACK)
+#     tile_text = font.render(tile_label, True, BLACK)
+# 
+#     screen.blit(board_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 700))
+#     screen.blit(tile_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 670))
 
 def update_message_box():
     current_tile = get_current_tile()
@@ -602,11 +549,6 @@ sidebar_container.add_element(edit_text_button)
 
 clock = pygame.time.Clock()
 
-# Popup manager
-popup_open = False
-popup_elements = []
-popup_tile = None
-
 # Main game loop
 running = True
 selected_tile = None
@@ -644,42 +586,38 @@ while running:
                         if edit_mode:
                             tile.toggle_active()
                         elif json_link_mode:
-                            show_link_popup(tile)
+                            selected_file = filedialog.askopenfilename(
+                                title="Select a JSON file",
+                                initialdir=save_directory,
+                                filetypes=[("JSON files", "*.json")]
+                            )
+                            if selected_file:
+                                tile.set_json_file(selected_file)
                         break
-        elif event.type == pygame_gui.UI_BUTTON_PRESSED:
-            if event.ui_element == edit_button:
-                toggle_edit_mode()
-            elif event.ui_element == json_link_button:
-                toggle_json_link_mode()
-            elif event.ui_element == image_button:
-                directory = open_file_explorer()
-                if directory:
-                    current_tile = get_current_tile()
-                    current_tile.set_directory(directory)
-                    current_image_index = 0  # Reset image index when a new folder is assigned
-                    bring_window_to_front()  # Ensure window is brought to the front after loading
-            elif event.ui_element == save_button:
-                save_game_state()
-            elif event.ui_element == load_button:
-                load_game_state()
-            elif event.ui_element == delete_button:
-                remove_current_tile_folder()
-            elif event.ui_element == edit_text_button:
-                edit_text()
-            elif event.ui_element in popup_elements:
-                if popup_tile:  # Ensure popup_tile is set
-                    if event.ui_element.text == "Add Link":
-                        create_link(popup_tile)
-                    elif event.ui_element.text == "Delete Link":
-                        delete_link(popup_tile)
-                    elif event.ui_element.text == "Add Empty Link":
-                        add_empty_link(popup_tile)
-                    popup_open = False
-                    for elem in popup_elements:
-                        elem.kill()
-                    popup_elements = []
+        elif event.type == pygame.USEREVENT:
+            if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                if event.ui_element == edit_button:
+                    toggle_edit_mode()
+                elif event.ui_element == json_link_button:
+                    toggle_json_link_mode()
+                elif event.ui_element == image_button:
+                    directory = open_file_explorer()
+                    if directory:
+                        current_tile = get_current_tile()
+                        current_tile.set_directory(directory)
+                        current_image_index = 0  # Reset image index when a new folder is assigned
+                        bring_window_to_front()  # Ensure window is brought to the front after loading
+                elif event.ui_element == save_button:
+                    save_game_state()
+                elif event.ui_element == load_button:
+                    load_game_state()
+                elif event.ui_element == delete_button:
+                    remove_current_tile_folder()
+                elif event.ui_element == edit_text_button:
+                    edit_text()
 
-    manager.process_events(event)
+        manager.process_events(event)
+
     manager.update(time_delta)
 
     offset_x = screen_width - SIDEBAR_WIDTH + 10
@@ -712,7 +650,7 @@ while running:
             
             screen.blit(scaled_image_pygame, image_rect.topleft)
 
-    draw_current_tile_info()
+    # draw_current_tile_info()  # Remove this line to stop rendering the board and tile info
 
     sidebar_container.reposition_elements()
 
