@@ -80,6 +80,9 @@ current_image_index = 0
 save_directory = "saved_game_states"
 os.makedirs(save_directory, exist_ok=True)
 
+# Track the currently loaded file
+current_loaded_file = None
+
 def open_file_explorer():
     directory = filedialog.askdirectory()
     return directory
@@ -362,12 +365,15 @@ def remove_current_tile_folder():
 
 # Functions to save and load the game state
 def save_game_state():
-    filename = simpledialog.askstring("Save Game", "Enter the save file name:")
-    if not filename:
-        messagebox.showwarning("Save Game", "Save file name cannot be empty.")
-        return
+    global current_loaded_file
 
-    filepath = os.path.join(save_directory, f"{filename}.json")
+    if current_loaded_file is None:
+        filename = simpledialog.askstring("Save Game", "Enter the save file name:")
+        if not filename:
+            messagebox.showwarning("Save Game", "Save file name cannot be empty.")
+            return
+        current_loaded_file = os.path.join(save_directory, f"{filename}.json")
+    
     game_state = {
         "player_position": player_pos,
         "player_direction": player_direction,
@@ -392,11 +398,13 @@ def save_game_state():
                     }
                     game_state["tiles"].append(tile_data)
 
-    with open(filepath, "w") as file:
+    with open(current_loaded_file, "w") as file:
         json.dump(game_state, file, indent=4)
     print("Game state saved.")
 
 def load_game_state():
+    global current_loaded_file
+
     files = [f for f in os.listdir(save_directory) if f.endswith(".json")]
     if not files:
         messagebox.showwarning("Load Game", "No saved games found.")
@@ -411,6 +419,7 @@ def load_game_state():
     if not selected_file:
         return
 
+    current_loaded_file = selected_file
     load_game_state_from_file(selected_file)
     bring_window_to_front()  # Ensure window is brought to the front after loading
 
@@ -439,7 +448,7 @@ def load_game_state_from_file(filepath):
             tile.active = tile_data["active"]
             tile.directory = tile_data["directory"]
             tile.image_filenames = tile_data["image_filenames"]
-            tile.json_file = tile_data.get("json_file")  # Handle potential missing key
+            tile.json_file = tile_data.get("json_file")  # Ensure the JSON file path is correctly loaded
             tile.text_content = tile_data.get("text_content", "")  # Load text content
                 
         current_image_index = 0
@@ -447,6 +456,9 @@ def load_game_state_from_file(filepath):
         print("Game state loaded.")
     except FileNotFoundError:
         print("No saved game state found.")
+    except Exception as e:
+        print(f"Error loading game state: {e}")
+        messagebox.showerror("Load Game", f"Error loading game state: {e}")
 
 # Remove the draw_current_tile_info function call from the main game loop
 # def draw_current_tile_info():
@@ -464,6 +476,10 @@ def update_message_box():
     current_tile = get_current_tile()
     message_box.html_text = f"<font color='#000000'>{current_tile.text_content}</font>"  # Ensure text is black
     message_box.rebuild()  # Rebuild to apply changes
+
+# Function to save changes to the board and update its JSON file
+def save_changes_to_board():
+    save_game_state()
 
 # Setup pygame_gui manager
 manager = pygame_gui.UIManager((screen_width, screen_height))
@@ -547,6 +563,14 @@ edit_text_button = pygame_gui.elements.UIButton(
 )
 sidebar_container.add_element(edit_text_button)
 
+# Add a button to save changes to the board
+save_changes_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="Save Changes to Board",
+    manager=manager
+)
+sidebar_container.add_element(save_changes_button)
+
 clock = pygame.time.Clock()
 
 # Main game loop
@@ -615,6 +639,8 @@ while running:
                     remove_current_tile_folder()
                 elif event.ui_element == edit_text_button:
                     edit_text()
+                elif event.ui_element == save_changes_button:
+                    save_changes_to_board()
 
         manager.process_events(event)
 
