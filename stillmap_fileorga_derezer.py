@@ -1,5 +1,4 @@
 import os
-import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ExifTags
@@ -18,38 +17,21 @@ def get_image_date(image_path):
         print(f"Error reading EXIF data: {e}")
     return None
 
-def resize_image(input_path, output_path, target_width, target_height):
+def resize_image(input_path, output_path, target_width):
     with Image.open(input_path) as img:
-        # Correct orientation based on EXIF data
-        for orientation in ExifTags.TAGS.keys():
-            if ExifTags.TAGS[orientation] == 'Orientation':
-                break
-        exif = img._getexif()
-        if exif is not None:
-            orientation = exif.get(orientation, 1)
-            if orientation == 3:
-                img = img.rotate(180, expand=True)
-            elif orientation == 6:
-                img = img.rotate(270, expand=True)
-            elif orientation == 8:
-                img = img.rotate(90, expand=True)
+        # Calculate the scaling factor
+        scale_factor = target_width / img.width
+        
+        # Compute new dimensions
+        new_dimensions = (target_width, int(img.height * scale_factor))
+        
+        # Resize the image
+        resized_image = img.resize(new_dimensions, Image.LANCZOS)
+        
+        # Save the resized image with EXIF data
+        resized_image.save(output_path, quality=95, exif=img.info.get('exif'))
 
-        img_ratio = img.width / img.height
-        target_ratio = target_width / target_height
-
-        if img_ratio > target_ratio:
-            # Image is wider than target aspect ratio
-            new_width = target_width
-            new_height = int(target_width / img_ratio)
-        else:
-            # Image is taller than target aspect ratio
-            new_height = target_height
-            new_width = int(target_height * img_ratio)
-
-        resized_img = img.resize((new_width, new_height), Image.LANCZOS)
-        resized_img.save(output_path)
-
-def organize_photos(input_directory):
+def organize_photos(input_directory, target_width=2400):
     # Get all files in the input directory along with their creation dates
     files = []
     for f in os.listdir(input_directory):
@@ -88,7 +70,7 @@ def organize_photos(input_directory):
             if i + j < len(sorted_files):
                 src_file = os.path.join(input_directory, sorted_files[i + j])
                 dst_file = os.path.join(new_folder_path, f"{j + 1}.jpg")
-                resize_image(src_file, dst_file, 1920, 1080)
+                resize_image(src_file, dst_file, target_width)
 
     messagebox.showinfo("Success", f"Photos organized and resized into folders in: {output_directory}")
 
