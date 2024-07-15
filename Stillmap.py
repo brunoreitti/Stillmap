@@ -68,6 +68,7 @@ current_board = [NUM_BOARDS // 2, NUM_BOARDS // 2]
 # Edit mode toggle
 edit_mode = False
 json_link_mode = False
+clear_json_link_mode = False  # New toggle for clear JSON link mode
 
 # Initialize Tkinter root and hide the main window
 root = Tk()
@@ -136,7 +137,7 @@ class Tile:
 
     def draw(self, screen, mouse_pos, offset_x, offset_y):
         adjusted_rect = self.rect.move(offset_x, offset_y)
-        if adjusted_rect.collidepoint(mouse_pos) and (edit_mode or json_link_mode):
+        if adjusted_rect.collidepoint(mouse_pos) and (edit_mode or json_link_mode or clear_json_link_mode):
             self.color = LIGHT_GRAY
         else:
             if self.json_file:
@@ -161,6 +162,9 @@ class Tile:
 
     def set_json_file(self, json_file):
         self.json_file = json_file
+
+    def clear_json_file(self):
+        self.json_file = None
 
     def get_current_image(self, index):
         if not self.directory or index >= len(self.image_filenames):
@@ -346,9 +350,16 @@ def toggle_edit_mode():
     edit_button.set_text(f"Edit Mode: {'ON' if edit_mode else 'OFF'}")
 
 def toggle_json_link_mode():
-    global json_link_mode
+    global json_link_mode, clear_json_link_mode
     json_link_mode = not json_link_mode
+    clear_json_link_mode = False  # Ensure clear JSON link mode is turned off
     json_link_button.set_text(f"JSON Link Mode: {'ON' if json_link_mode else 'OFF'}")
+
+def toggle_clear_json_link_mode():
+    global clear_json_link_mode, json_link_mode
+    clear_json_link_mode = not clear_json_link_mode
+    json_link_mode = False  # Ensure JSON link mode is turned off
+    clear_json_link_button.set_text(f"Clear JSON Link Mode: {'ON' if clear_json_link_mode else 'OFF'}")
 
 def edit_text():
     current_tile = get_current_tile()
@@ -362,6 +373,14 @@ def remove_current_tile_folder():
     current_tile.clear_directory()
     update_message_box()  # Update the message box after removing the folder
     print(f"Removed folder association from the current tile.")
+
+# Function to clear JSON links from the current tile
+def clear_current_tile_json_link():
+    current_tile = get_current_tile()
+    current_tile.clear_json_file()
+    current_tile.color = WHITE  # Reset color to white to indicate no link
+    update_message_box()  # Update the message box after clearing the JSON link
+    print(f"Cleared JSON link from the current tile.")
 
 # Functions to save and load the game state
 def save_game_state():
@@ -536,6 +555,14 @@ delete_button = pygame_gui.elements.UIButton(
 )
 sidebar_container.add_element(delete_button)
 
+# Add a button to clear JSON links
+clear_json_link_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="Clear JSON Link Mode: OFF",
+    manager=manager
+)
+sidebar_container.add_element(clear_json_link_button)
+
 # Add a scrollable text area to display text content
 message_box_panel = pygame_gui.elements.UIPanel(
     relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 120)),  # Adjust the height and width as needed
@@ -593,6 +620,8 @@ while running:
                 toggle_edit_mode()
             elif event.key == pygame.K_j:  # Toggle JSON link mode with 'J' key
                 toggle_json_link_mode()
+            elif event.key == pygame.K_c:  # Toggle clear JSON link mode with 'C' key
+                toggle_clear_json_link_mode()
             elif event.key == pygame.K_UP:
                 move_player(forward=True)
             elif event.key == pygame.K_DOWN:
@@ -617,6 +646,10 @@ while running:
                             )
                             if selected_file:
                                 tile.set_json_file(selected_file)
+                        elif clear_json_link_mode:
+                            tile.clear_json_file()
+                            tile.color = WHITE  # Reset color to white to indicate no link
+                            update_message_box()  # Update the message box
                         break
         elif event.type == pygame.USEREVENT:
             if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
@@ -637,6 +670,8 @@ while running:
                     load_game_state()
                 elif event.ui_element == delete_button:
                     remove_current_tile_folder()
+                elif event.ui_element == clear_json_link_button:
+                    toggle_clear_json_link_mode()
                 elif event.ui_element == edit_text_button:
                     edit_text()
                 elif event.ui_element == save_changes_button:
