@@ -600,9 +600,28 @@ sidebar_container.add_element(save_changes_button)
 
 clock = pygame.time.Clock()
 
+# Dictionary to store original button texts
+original_button_texts = {}
+
+# Function to show confirmation on a button
+def show_button_confirmation(button, confirmation_text, duration=2000):
+    global original_button_texts, confirmation_end_time, confirmation_button
+    original_button_texts[button] = button.text
+    button.set_text(confirmation_text)
+    confirmation_end_time = pygame.time.get_ticks() + duration
+    confirmation_button = button
+    print("Button confirmation displayed:", confirmation_text)
+
+# Function to save changes to the board and update its JSON file
+def save_changes_to_board():
+    save_game_state()
+    show_button_confirmation(save_changes_button, "Changes saved!", duration=2000)
+
 # Main game loop
 running = True
 selected_tile = None
+confirmation_button = None  # To store the current confirmation button
+confirmation_end_time = 0  # To track when to revert the button text
 while running:
     time_delta = clock.tick(60) / 1000.0  # Limits the frame rate to 60 FPS
     screen.fill(MAIN_BG_COLOR)  # Fill the main area with the main background color
@@ -651,33 +670,38 @@ while running:
                             tile.color = WHITE  # Reset color to white to indicate no link
                             update_message_box()  # Update the message box
                         break
-        elif event.type == pygame.USEREVENT:
-            if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
-                if event.ui_element == edit_button:
-                    toggle_edit_mode()
-                elif event.ui_element == json_link_button:
-                    toggle_json_link_mode()
-                elif event.ui_element == image_button:
-                    directory = open_file_explorer()
-                    if directory:
-                        current_tile = get_current_tile()
-                        current_tile.set_directory(directory)
-                        current_image_index = 0  # Reset image index when a new folder is assigned
-                        bring_window_to_front()  # Ensure window is brought to the front after loading
-                elif event.ui_element == save_button:
-                    save_game_state()
-                elif event.ui_element == load_button:
-                    load_game_state()
-                elif event.ui_element == delete_button:
-                    remove_current_tile_folder()
-                elif event.ui_element == clear_json_link_button:
-                    toggle_clear_json_link_mode()
-                elif event.ui_element == edit_text_button:
-                    edit_text()
-                elif event.ui_element == save_changes_button:
-                    save_changes_to_board()
+        elif event.type == pygame_gui.UI_BUTTON_PRESSED:
+            if event.ui_element == edit_button:
+                toggle_edit_mode()
+            elif event.ui_element == json_link_button:
+                toggle_json_link_mode()
+            elif event.ui_element == image_button:
+                directory = open_file_explorer()
+                if directory:
+                    current_tile = get_current_tile()
+                    current_tile.set_directory(directory)
+                    current_image_index = 0  # Reset image index when a new folder is assigned
+                    bring_window_to_front()  # Ensure window is brought to the front after loading
+            elif event.ui_element == save_button:
+                save_game_state()
+            elif event.ui_element == load_button:
+                load_game_state()
+            elif event.ui_element == delete_button:
+                remove_current_tile_folder()
+            elif event.ui_element == clear_json_link_button:
+                toggle_clear_json_link_mode()
+            elif event.ui_element == edit_text_button:
+                edit_text()
+            elif event.ui_element == save_changes_button:
+                save_changes_to_board()
 
         manager.process_events(event)
+
+    # Revert the button text after the duration has passed
+    if confirmation_button and pygame.time.get_ticks() > confirmation_end_time:
+        confirmation_button.set_text(original_button_texts[confirmation_button])
+        confirmation_button = None
+        print("Button confirmation hidden")
 
     manager.update(time_delta)
 
