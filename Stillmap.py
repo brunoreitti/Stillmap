@@ -84,6 +84,9 @@ os.makedirs(save_directory, exist_ok=True)
 # Track the currently loaded file
 current_loaded_file = None
 
+# Track the relative position of the player when triggering a link
+relative_player_position = None
+
 def open_file_explorer():
     directory = filedialog.askdirectory()
     return directory
@@ -255,7 +258,7 @@ def draw_player(offset_x, offset_y):
         pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
 
 def move_player(forward=True):
-    global current_board
+    global current_board, relative_player_position
 
     new_pos = player_pos[:]
     direction = player_direction if forward else (player_direction + 4) % 8  # Adjust direction for backward movement
@@ -321,9 +324,10 @@ def move_player(forward=True):
         if get_current_board()[new_pos[0]][new_pos[1]].active:
             # Check if the tile has a JSON link
             if get_current_board()[new_pos[0]][new_pos[1]].json_file:
+                relative_player_position = [new_pos[0] - player_pos[0], new_pos[1] - player_pos[1]]
                 response = messagebox.askyesno("Trigger JSON Link", "Do you want to trigger the linked JSON file?")
                 if response:
-                    load_game_state_from_file(get_current_board()[new_pos[0]][new_pos[1]].json_file)
+                    load_game_state_from_file(get_current_board()[new_pos[0]][new_pos[1]].json_file, from_link=True)
                     bring_window_to_front()  # Ensure window is brought to the front after loading
                     return  # Prevent movement to the tile after loading the new game state
                 else:
@@ -442,8 +446,8 @@ def load_game_state():
     load_game_state_from_file(selected_file)
     bring_window_to_front()  # Ensure window is brought to the front after loading
 
-def load_game_state_from_file(filepath):
-    global player_pos, player_direction, current_board, current_image_index
+def load_game_state_from_file(filepath, from_link=False):
+    global player_pos, player_direction, current_board, current_image_index, relative_player_position
 
     # Clear the current game state
     for board_row in boards:
@@ -457,9 +461,10 @@ def load_game_state_from_file(filepath):
         with open(filepath, "r") as file:
             game_state = json.load(file)
         
-        player_pos = game_state["player_position"]
-        player_direction = game_state["player_direction"]
-        current_board = game_state["current_board"]
+        if not from_link:
+            player_pos = game_state["player_position"]
+            player_direction = game_state["player_direction"]
+            current_board = game_state["current_board"]
 
         for tile_data in game_state["tiles"]:
             board_index = tile_data.get("board_row", 0) * NUM_BOARDS + tile_data.get("board_col", 0)
@@ -469,8 +474,23 @@ def load_game_state_from_file(filepath):
             tile.image_filenames = tile_data["image_filenames"]
             tile.json_file = tile_data.get("json_file")  # Ensure the JSON file path is correctly loaded
             tile.text_content = tile_data.get("text_content", "")  # Load text content
-                
+
+        if from_link and relative_player_position:
+            # Reposition the player based on the relative position
+            for board_row in boards:
+                for board in board_row:
+                    for row in board:
+                        for tile in row:
+                            if tile.json_file == filepath:
+                                new_row = tile.row + relative_player_position[0]
+                                new_col = tile.col + relative_player_position[1]
+                                # Ensure the new position is within bounds
+                                if 0 <= new_row < ROWS and 0 <= new_col < COLS:
+                                    player_pos = [new_row, new_col]
+                                break
+
         current_image_index = 0
+        relative_player_position = None  # Reset the relative position after use
         update_message_box()  # Update the message box after loading the game state
         print("Game state loaded.")
     except FileNotFoundError:
@@ -479,26 +499,10 @@ def load_game_state_from_file(filepath):
         print(f"Error loading game state: {e}")
         messagebox.showerror("Load Game", f"Error loading game state: {e}")
 
-# Remove the draw_current_tile_info function call from the main game loop
-# def draw_current_tile_info():
-#     font = pygame.font.Font(None, 24)
-#     board_label = f"Board: ({current_board[0]}, {current_board[1]})"
-#     tile_label = f"Tile: ({player_pos[0]}, {player_pos[1]})"
-# 
-#     board_text = font.render(board_label, True, BLACK)
-#     tile_text = font.render(tile_label, True, BLACK)
-# 
-#     screen.blit(board_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 700))
-#     screen.blit(tile_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 670))
-
 def update_message_box():
     current_tile = get_current_tile()
     message_box.html_text = f"<font color='#000000'>{current_tile.text_content}</font>"  # Ensure text is black
     message_box.rebuild()  # Rebuild to apply changes
-
-# Function to save changes to the board and update its JSON file
-def save_changes_to_board():
-    save_game_state()
 
 # Setup pygame_gui manager
 manager = pygame_gui.UIManager((screen_width, screen_height))
@@ -590,14 +594,6 @@ edit_text_button = pygame_gui.elements.UIButton(
 )
 sidebar_container.add_element(edit_text_button)
 
-# Add a button to save changes to the board
-save_changes_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Save Changes to Board",
-    manager=manager
-)
-sidebar_container.add_element(save_changes_button)
-
 clock = pygame.time.Clock()
 
 # Dictionary to store original button texts
@@ -611,11 +607,6 @@ def show_button_confirmation(button, confirmation_text, duration=2000):
     confirmation_end_time = pygame.time.get_ticks() + duration
     confirmation_button = button
     print("Button confirmation displayed:", confirmation_text)
-
-# Function to save changes to the board and update its JSON file
-def save_changes_to_board():
-    save_game_state()
-    show_button_confirmation(save_changes_button, "Changes saved!", duration=2000)
 
 # Main game loop
 running = True
@@ -692,8 +683,6 @@ while running:
                 toggle_clear_json_link_mode()
             elif event.ui_element == edit_text_button:
                 edit_text()
-            elif event.ui_element == save_changes_button:
-                save_changes_to_board()
 
         manager.process_events(event)
 
@@ -734,8 +723,6 @@ while running:
             image_rect = scaled_image_pygame.get_rect(center=image_display_area.center)
             
             screen.blit(scaled_image_pygame, image_rect.topleft)
-
-    # draw_current_tile_info()  # Remove this line to stop rendering the board and tile info
 
     sidebar_container.reposition_elements()
 
