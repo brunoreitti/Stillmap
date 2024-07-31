@@ -70,6 +70,11 @@ edit_mode = False
 json_link_mode = False
 clear_json_link_mode = False  # New toggle for clear JSON link mode
 
+# Temporary variables to store player's position and direction when triggering a link
+temporary_player_pos = None
+temporary_player_direction = None
+temporary_player_orientation = None
+
 # Initialize Tkinter root and hide the main window
 root = Tk()
 root.withdraw()
@@ -83,9 +88,6 @@ os.makedirs(save_directory, exist_ok=True)
 
 # Track the currently loaded file
 current_loaded_file = None
-
-# Track the relative position of the player when triggering a link
-relative_player_position = None
 
 def open_file_explorer():
     directory = filedialog.askdirectory()
@@ -258,7 +260,7 @@ def draw_player(offset_x, offset_y):
         pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
 
 def move_player(forward=True):
-    global current_board, relative_player_position
+    global current_board, temporary_player_pos, temporary_player_direction, temporary_player_orientation, current_loaded_file
 
     new_pos = player_pos[:]
     direction = player_direction if forward else (player_direction + 4) % 8  # Adjust direction for backward movement
@@ -310,6 +312,8 @@ def move_player(forward=True):
         if current_board[1] < NUM_BOARDS - 1:
             new_pos[1] = 0
             new_board[1] += 1
+        else:
+            new_pos[1] = COLS - 1
 
     # Check if the new position is in an active tile
     if new_board != current_board:
@@ -324,10 +328,14 @@ def move_player(forward=True):
         if get_current_board()[new_pos[0]][new_pos[1]].active:
             # Check if the tile has a JSON link
             if get_current_board()[new_pos[0]][new_pos[1]].json_file:
-                relative_player_position = [new_pos[0] - player_pos[0], new_pos[1] - player_pos[1]]
                 response = messagebox.askyesno("Trigger JSON Link", "Do you want to trigger the linked JSON file?")
                 if response:
-                    load_game_state_from_file(get_current_board()[new_pos[0]][new_pos[1]].json_file, from_link=True)
+                    # Save temporary position and direction
+                    temporary_player_pos = player_pos[:]
+                    temporary_player_direction = player_direction
+                    temporary_player_orientation = get_direction_name(player_direction)
+                    
+                    load_game_state_from_file(get_current_board()[new_pos[0]][new_pos[1]].json_file, link_triggered=True)
                     bring_window_to_front()  # Ensure window is brought to the front after loading
                     return  # Prevent movement to the tile after loading the new game state
                 else:
@@ -446,8 +454,106 @@ def load_game_state():
     load_game_state_from_file(selected_file)
     bring_window_to_front()  # Ensure window is brought to the front after loading
 
-def load_game_state_from_file(filepath, from_link=False):
-    global player_pos, player_direction, current_board, current_image_index, relative_player_position
+def fetch_game_state(filepath):
+    try:
+        with open(filepath, "r") as file:
+            game_state = json.load(file)
+        return game_state
+    except Exception as e:
+        print(f"Error fetching game state: {e}")
+        return None
+
+def find_link_tile(game_state, previous_game_file):
+    for tile_data in game_state["tiles"]:
+        if tile_data.get("json_file") == previous_game_file:
+            return tile_data
+    return None
+
+def calculate_adjacent_tile(tile, direction):
+    row, col = tile["row"], tile["col"]
+    if direction == "North":
+        return row - 1, col
+    elif direction == "North-East":
+        return row - 1, col + 1
+    elif direction == "East":
+        return row, col + 1
+    elif direction == "South-East":
+        return row + 1, col + 1
+    elif direction == "South":
+        return row + 1, col
+    elif direction == "South-West":
+        return row + 1, col - 1
+    elif direction == "West":
+        return row, col - 1
+    elif direction == "North-West":
+        return row - 1, col - 1
+    return None  # Ensure the function always returns a tuple
+
+def calculate_opposite_tile(tile, direction):
+    row, col = tile["row"], tile["col"]
+    if direction == "North":
+        return row - 1, col
+    elif direction == "North-East":
+        return row - 1, col + 1
+    elif direction == "East":
+        return row, col + 1
+    elif direction == "South-East":
+        return row + 1, col + 1
+    elif direction == "South":
+        return row + 1, col
+    elif direction == "South-West":
+        return row + 1, col - 1
+    elif direction == "West":
+        return row, col - 1
+    elif direction == "North-West":
+        return row - 1, col - 1
+    return None
+
+def get_opposite_direction(direction):
+    opposites = {
+        "North": "South",
+        "North-East": "South-West",
+        "East": "West",
+        "South-East": "North-West",
+        "South": "North",
+        "South-West": "North-East",
+        "West": "East",
+        "North-West": "South-East"
+    }
+    return opposites[direction]
+
+def get_direction_name(direction):
+    directions = ["North", "North-East", "East", "South-East", "South", "South-West", "West", "North-West"]
+    return directions[direction]
+
+def load_game_state_from_file(filepath, link_triggered=False):
+    global player_pos, player_direction, current_board, current_image_index, temporary_player_pos, temporary_player_direction, temporary_player_orientation, current_loaded_file
+
+    game_state = fetch_game_state(filepath)
+    if not game_state:
+        return
+
+    previous_game_file = current_loaded_file
+    current_loaded_file = filepath
+
+    if link_triggered:
+        link_tile = find_link_tile(game_state, previous_game_file)
+        if link_tile and temporary_player_orientation:
+            opp_direction = get_opposite_direction(temporary_player_orientation)
+            opp_row, opp_col = calculate_opposite_tile(link_tile, temporary_player_orientation)
+
+            if 0 <= opp_row < ROWS and 0 <= opp_col < COLS:
+                player_pos = [opp_row, opp_col]
+            else:
+                print("Opposite tile is out of bounds.")
+                return
+
+            player_direction = temporary_player_direction
+            current_board = [link_tile["board_row"], link_tile["board_col"]]
+    else:
+        player_pos = game_state["player_position"]
+        player_direction = game_state["player_direction"]
+        current_board = game_state["current_board"]
 
     # Clear the current game state
     for board_row in boards:
@@ -458,39 +564,16 @@ def load_game_state_from_file(filepath, from_link=False):
                     tile.clear_directory()
 
     try:
-        with open(filepath, "r") as file:
-            game_state = json.load(file)
-        
-        if not from_link:
-            player_pos = game_state["player_position"]
-            player_direction = game_state["player_direction"]
-            current_board = game_state["current_board"]
-
         for tile_data in game_state["tiles"]:
             board_index = tile_data.get("board_row", 0) * NUM_BOARDS + tile_data.get("board_col", 0)
             tile = boards[tile_data.get("board_row", 0)][tile_data.get("board_col", 0)][tile_data["row"]][tile_data["col"]]
             tile.active = tile_data["active"]
             tile.directory = tile_data["directory"]
             tile.image_filenames = tile_data["image_filenames"]
-            tile.json_file = tile_data.get("json_file")  # Ensure the JSON file path is correctly loaded
-            tile.text_content = tile_data.get("text_content", "")  # Load text content
-
-        if from_link and relative_player_position:
-            # Reposition the player based on the relative position
-            for board_row in boards:
-                for board in board_row:
-                    for row in board:
-                        for tile in row:
-                            if tile.json_file == filepath:
-                                new_row = tile.row + relative_player_position[0]
-                                new_col = tile.col + relative_player_position[1]
-                                # Ensure the new position is within bounds
-                                if 0 <= new_row < ROWS and 0 <= new_col < COLS:
-                                    player_pos = [new_row, new_col]
-                                break
+            tile.json_file = tile_data.get("json_file")
+            tile.text_content = tile_data.get("text_content", "")
 
         current_image_index = 0
-        relative_player_position = None  # Reset the relative position after use
         update_message_box()  # Update the message box after loading the game state
         print("Game state loaded.")
     except FileNotFoundError:
@@ -503,6 +586,10 @@ def update_message_box():
     current_tile = get_current_tile()
     message_box.html_text = f"<font color='#000000'>{current_tile.text_content}</font>"  # Ensure text is black
     message_box.rebuild()  # Rebuild to apply changes
+
+# Function to save changes to the board and update its JSON file
+def save_changes_to_board():
+    save_game_state()
 
 # Setup pygame_gui manager
 manager = pygame_gui.UIManager((screen_width, screen_height))
@@ -594,6 +681,14 @@ edit_text_button = pygame_gui.elements.UIButton(
 )
 sidebar_container.add_element(edit_text_button)
 
+# Add a button to save changes to the board
+save_changes_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="Save Changes to Board",
+    manager=manager
+)
+sidebar_container.add_element(save_changes_button)
+
 clock = pygame.time.Clock()
 
 # Dictionary to store original button texts
@@ -607,6 +702,11 @@ def show_button_confirmation(button, confirmation_text, duration=2000):
     confirmation_end_time = pygame.time.get_ticks() + duration
     confirmation_button = button
     print("Button confirmation displayed:", confirmation_text)
+
+# Function to save changes to the board and update its JSON file
+def save_changes_to_board():
+    save_game_state()
+    show_button_confirmation(save_changes_button, "Changes saved!", duration=2000)
 
 # Main game loop
 running = True
@@ -683,6 +783,8 @@ while running:
                 toggle_clear_json_link_mode()
             elif event.ui_element == edit_text_button:
                 edit_text()
+            elif event.ui_element == save_changes_button:
+                save_changes_to_board()
 
         manager.process_events(event)
 
