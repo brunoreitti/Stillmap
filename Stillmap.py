@@ -7,6 +7,7 @@ import json
 from tkinter import Tk, filedialog, simpledialog, messagebox
 import cv2
 import numpy as np
+import subprocess
 
 # Initialize Pygame and Pygame GUI
 pygame.init()
@@ -689,6 +690,14 @@ save_changes_button = pygame_gui.elements.UIButton(
 )
 sidebar_container.add_element(save_changes_button)
 
+# Add a button to add a folder
+add_folder_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="Add Folder",
+    manager=manager
+)
+sidebar_container.add_element(add_folder_button)
+
 clock = pygame.time.Clock()
 
 # Dictionary to store original button texts
@@ -707,6 +716,23 @@ def show_button_confirmation(button, confirmation_text, duration=2000):
 def save_changes_to_board():
     save_game_state()
     show_button_confirmation(save_changes_button, "Changes saved!", duration=2000)
+
+# Function to handle adding a folder and displaying a link in the text box
+def add_folder():
+    directory = open_file_explorer()
+    if directory:
+        current_tile = get_current_tile()
+        current_tile.set_directory(directory)
+        current_image_index = 0  # Reset image index when a new folder is assigned
+        link_text = f"<a href='{directory}'><font color='#0000FF'>{os.path.basename(directory)}</font></a>"
+        current_tile.text_content += f"\n{link_text}"
+        update_message_box()
+        bring_window_to_front()  # Ensure window is brought to the front after loading
+
+# Function to handle clicking on a link in the text box
+def handle_link_click(link):
+    if os.path.isdir(link):
+        subprocess.Popen(['python', 'image_viewer.py', link])
 
 # Main game loop
 running = True
@@ -785,8 +811,15 @@ while running:
                 edit_text()
             elif event.ui_element == save_changes_button:
                 save_changes_to_board()
+            elif event.ui_element == add_folder_button:
+                add_folder()
 
         manager.process_events(event)
+
+        # Check for clicks on links in the message box
+        if event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
+            link_target = event.link_target
+            handle_link_click(link_target)
 
     # Revert the button text after the duration has passed
     if confirmation_button and pygame.time.get_ticks() > confirmation_end_time:
@@ -802,29 +835,6 @@ while running:
     draw_board(mouse_pos, offset_x, offset_y)
     draw_player(offset_x, offset_y)
     current_tile = get_current_tile()
-
-    # Draw the image display area
-    image_display_area = pygame.Rect(10, 10, screen_width - SIDEBAR_WIDTH - 20, screen_height - 20)
-    pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
-
-    # Display the selected image if the current tile has images
-    if current_tile.image_filenames:
-        current_image = current_tile.get_current_image(current_image_index)
-        if current_image is not None:
-            img_height, img_width = current_image.shape[:2]
-            
-            display_width, display_height = image_display_area.width, image_display_area.height
-
-            # Calculate scale factors and new dimensions
-            scale_factor = min(display_width / img_width, display_height / img_height)
-            new_width = int(img_width * scale_factor)
-            new_height = int(img_height * scale_factor)
-
-            scaled_image = cv2.resize(current_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-            scaled_image_pygame = cv2_to_pygame(scaled_image)
-            image_rect = scaled_image_pygame.get_rect(center=image_display_area.center)
-            
-            screen.blit(scaled_image_pygame, image_rect.topleft)
 
     sidebar_container.reposition_elements()
 
