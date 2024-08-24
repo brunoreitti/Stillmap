@@ -140,7 +140,7 @@ class Tile:
         self.image_filenames = []
         self.json_file = None  # New attribute to store the associated JSON file
         self.text_content = ""  # New attribute to store the text content
-        self.folder_link = None  # Store the folder link
+        self.folder_link = None  # New attribute to store the folder link
 
     def draw(self, screen, mouse_pos, offset_x, offset_y):
         adjusted_rect = self.rect.move(offset_x, offset_y)
@@ -173,6 +173,9 @@ class Tile:
     def clear_json_file(self):
         self.json_file = None
 
+    def set_folder_link(self, link):
+        self.folder_link = link
+
     def get_current_image(self, index):
         if not self.directory or index >= len(self.image_filenames):
             return None
@@ -191,12 +194,6 @@ class Tile:
             except Exception as e:
                 return f"Error loading JSON: {e}"
         return "No JSON linked."
-
-    def set_folder_link(self, link):
-        self.folder_link = link
-
-    def clear_folder_link(self):
-        self.folder_link = None
 
 class SidebarContainer:
     def __init__(self, x, y, width, height, padding=10, offset=0):
@@ -594,16 +591,13 @@ def load_game_state_from_file(filepath, link_triggered=False):
 
 def update_message_box():
     current_tile = get_current_tile()
-    message = f"<font color='#000000'>{current_tile.text_content}</font>"
-    if current_tile.folder_link:
-        link_text = f"<br><a href='{current_tile.folder_link}'><font color='#0000FF'>{os.path.basename(current_tile.folder_link)}</font></a>"
-        message += link_text
-    message_box.html_text = message
-    message_box.rebuild()
+    message_box.html_text = f"<font color='#000000'>{current_tile.text_content}</font>"  # Ensure text is black
 
-# Function to save changes to the board and update its JSON file
-def save_changes_to_board():
-    save_game_state()
+    # Add the folder link to the message box if it exists
+    if current_tile.folder_link:
+        message_box.html_text += f"<br><a href='{current_tile.folder_link}'><font color='#0000FF'>{os.path.basename(current_tile.folder_link)}</font></a>"
+
+    message_box.rebuild()  # Rebuild to apply changes
 
 # Setup pygame_gui manager
 manager = pygame_gui.UIManager((screen_width, screen_height))
@@ -695,14 +689,6 @@ edit_text_button = pygame_gui.elements.UIButton(
 )
 sidebar_container.add_element(edit_text_button)
 
-# Add a button to save changes to the board
-save_changes_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Save Changes to Board",
-    manager=manager
-)
-sidebar_container.add_element(save_changes_button)
-
 # Add a button to add a folder
 add_folder_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
@@ -725,18 +711,13 @@ def show_button_confirmation(button, confirmation_text, duration=2000):
     confirmation_button = button
     print("Button confirmation displayed:", confirmation_text)
 
-# Function to save changes to the board and update its JSON file
-def save_changes_to_board():
-    save_game_state()
-    show_button_confirmation(save_changes_button, "Changes saved!", duration=2000)
-
 # Function to handle adding a folder and displaying a link in the text box
 def add_folder():
     directory = open_file_explorer()
     if directory:
         current_tile = get_current_tile()
         current_tile.set_folder_link(directory)
-        update_message_box()  # Update the message box after adding the folder link
+        update_message_box()
         bring_window_to_front()  # Ensure window is brought to the front after loading
 
 # Function to handle clicking on a link in the text box
@@ -819,8 +800,6 @@ while running:
                 toggle_clear_json_link_mode()
             elif event.ui_element == edit_text_button:
                 edit_text()
-            elif event.ui_element == save_changes_button:
-                save_changes_to_board()
             elif event.ui_element == add_folder_button:
                 add_folder()
 
