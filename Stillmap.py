@@ -140,6 +140,7 @@ class Tile:
         self.image_filenames = []
         self.json_file = None  # New attribute to store the associated JSON file
         self.text_content = ""  # New attribute to store the text content
+        self.folder_link = None  # Store the folder link
 
     def draw(self, screen, mouse_pos, offset_x, offset_y):
         adjusted_rect = self.rect.move(offset_x, offset_y)
@@ -190,6 +191,12 @@ class Tile:
             except Exception as e:
                 return f"Error loading JSON: {e}"
         return "No JSON linked."
+
+    def set_folder_link(self, link):
+        self.folder_link = link
+
+    def clear_folder_link(self):
+        self.folder_link = None
 
 class SidebarContainer:
     def __init__(self, x, y, width, height, padding=10, offset=0):
@@ -426,7 +433,8 @@ def save_game_state():
                         "directory": tile.directory,
                         "image_filenames": tile.image_filenames,
                         "json_file": tile.json_file,
-                        "text_content": tile.text_content  # Include text content in the save
+                        "text_content": tile.text_content,  # Include text content in the save
+                        "folder_link": tile.folder_link  # Include folder link in the save
                     }
                     game_state["tiles"].append(tile_data)
 
@@ -573,6 +581,7 @@ def load_game_state_from_file(filepath, link_triggered=False):
             tile.image_filenames = tile_data["image_filenames"]
             tile.json_file = tile_data.get("json_file")
             tile.text_content = tile_data.get("text_content", "")
+            tile.folder_link = tile_data.get("folder_link", None)
 
         current_image_index = 0
         update_message_box()  # Update the message box after loading the game state
@@ -585,8 +594,12 @@ def load_game_state_from_file(filepath, link_triggered=False):
 
 def update_message_box():
     current_tile = get_current_tile()
-    message_box.html_text = f"<font color='#000000'>{current_tile.text_content}</font>"  # Ensure text is black
-    message_box.rebuild()  # Rebuild to apply changes
+    message = f"<font color='#000000'>{current_tile.text_content}</font>"
+    if current_tile.folder_link:
+        link_text = f"<br><a href='{current_tile.folder_link}'><font color='#0000FF'>{os.path.basename(current_tile.folder_link)}</font></a>"
+        message += link_text
+    message_box.html_text = message
+    message_box.rebuild()
 
 # Function to save changes to the board and update its JSON file
 def save_changes_to_board():
@@ -722,11 +735,8 @@ def add_folder():
     directory = open_file_explorer()
     if directory:
         current_tile = get_current_tile()
-        current_tile.set_directory(directory)
-        current_image_index = 0  # Reset image index when a new folder is assigned
-        link_text = f"<a href='{directory}'><font color='#0000FF'>{os.path.basename(directory)}</font></a>"
-        current_tile.text_content += f"\n{link_text}"
-        update_message_box()
+        current_tile.set_folder_link(directory)
+        update_message_box()  # Update the message box after adding the folder link
         bring_window_to_front()  # Ensure window is brought to the front after loading
 
 # Function to handle clicking on a link in the text box
@@ -835,6 +845,29 @@ while running:
     draw_board(mouse_pos, offset_x, offset_y)
     draw_player(offset_x, offset_y)
     current_tile = get_current_tile()
+
+    # Draw the image display area
+    image_display_area = pygame.Rect(10, 10, screen_width - SIDEBAR_WIDTH - 20, screen_height - 20)
+    pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
+
+    # Display the selected image if the current tile has images
+    if current_tile.image_filenames:
+        current_image = current_tile.get_current_image(current_image_index)
+        if current_image is not None:
+            img_height, img_width = current_image.shape[:2]
+            
+            display_width, display_height = image_display_area.width, image_display_area.height
+
+            # Calculate scale factors and new dimensions
+            scale_factor = min(display_width / img_width, display_height / img_height)
+            new_width = int(img_width * scale_factor)
+            new_height = int(img_height * scale_factor)
+
+            scaled_image = cv2.resize(current_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            scaled_image_pygame = cv2_to_pygame(scaled_image)
+            image_rect = scaled_image_pygame.get_rect(center=image_display_area.center)
+            
+            screen.blit(scaled_image_pygame, image_rect.topleft)
 
     sidebar_container.reposition_elements()
 
