@@ -48,7 +48,6 @@ NUM_BOARDS = 3  # Number of 9x9 boards in each direction (3x3 grid)
 # Colors
 COLOR1 = (40, 42, 54)
 COLOR2 = (68, 71, 90)
-COLOR3 = ()
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 GREEN = (0, 255, 0)
@@ -373,17 +372,17 @@ def toggle_json_link_mode():
     global json_link_mode, clear_json_link_mode
     json_link_mode = not json_link_mode
     clear_json_link_mode = False  # Ensure clear JSON link mode is turned off
-    json_link_button.set_text(f"JSON Link Mode: {'ON' if json_link_mode else 'OFF'}")
+    json_link_button.set_text(f"Manage JSON Links: {'ON' if json_link_mode else 'OFF'}")
 
 def toggle_clear_json_link_mode():
     global clear_json_link_mode, json_link_mode
     clear_json_link_mode = not clear_json_link_mode
     json_link_mode = False  # Ensure JSON link mode is turned off
-    clear_json_link_button.set_text(f"Clear JSON Link Mode: {'ON' if clear_json_link_mode else 'OFF'}")
+    clear_json_link_button.set_text(f"Clear JSON Links: {'ON' if clear_json_link_mode else 'OFF'}")
 
 def edit_text():
     current_tile = get_current_tile()
-    new_text = simpledialog.askstring("Edit Text", "Enter new text:", initialvalue=current_tile.text_content)
+    new_text = simpledialog.askstring("Edit Description", "Enter new text:", initialvalue=current_tile.text_content)
     if new_text is not None:
         current_tile.text_content = new_text
         update_message_box()  # Update the message box with the new text
@@ -614,27 +613,13 @@ sidebar_container = SidebarContainer(
     offset=125  # Raise the elements by 125 pixels
 )
 
-# Create GUI buttons
-edit_button = pygame_gui.elements.UIButton(
+# Create GUI buttons in a logical order with official-sounding labels
+load_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Edit Mode: OFF",
+    text="Load Game",
     manager=manager
 )
-sidebar_container.add_element(edit_button)
-
-json_link_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="JSON Link Mode: OFF",
-    manager=manager
-)
-sidebar_container.add_element(json_link_button)
-
-image_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Select Folder",
-    manager=manager
-)
-sidebar_container.add_element(image_button)
+sidebar_container.add_element(load_button)
 
 save_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
@@ -643,24 +628,51 @@ save_button = pygame_gui.elements.UIButton(
 )
 sidebar_container.add_element(save_button)
 
-load_button = pygame_gui.elements.UIButton(
+edit_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Load Game",
+    text="Edit Mode",
     manager=manager
 )
-sidebar_container.add_element(load_button)
+sidebar_container.add_element(edit_button)
+
+image_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="Select Image Folder",
+    manager=manager
+)
+sidebar_container.add_element(image_button)
 
 delete_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Remove Folder",
+    text="Remove Image Folder",
     manager=manager
 )
 sidebar_container.add_element(delete_button)
 
-# Add a button to clear JSON links
+add_folder_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="Add Folder Link",
+    manager=manager
+)
+sidebar_container.add_element(add_folder_button)
+
+edit_text_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="Edit Description",
+    manager=manager
+)
+sidebar_container.add_element(edit_text_button)
+
+json_link_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
+    text="Manage JSON Links",
+    manager=manager
+)
+sidebar_container.add_element(json_link_button)
+
 clear_json_link_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Clear JSON Link Mode: OFF",
+    text="Clear JSON Links",
     manager=manager
 )
 sidebar_container.add_element(clear_json_link_button)
@@ -683,22 +695,6 @@ message_box.background_colour = pygame.Color("#FFFFFF")  # Set the background co
 message_box.text_colour = pygame.Color("#000000")  # Set the text color to black
 message_box.rebuild()  # Ensure the text box is rebuilt with the new settings
 sidebar_container.add_element(message_box_panel)
-
-# Add a button to edit text
-edit_text_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Edit current image discriptions",
-    manager=manager
-)
-sidebar_container.add_element(edit_text_button)
-
-# Add a button to add a folder
-add_folder_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Add Folder",
-    manager=manager
-)
-sidebar_container.add_element(add_folder_button)
 
 clock = pygame.time.Clock()
 
@@ -782,10 +778,12 @@ while running:
                             update_message_box()  # Update the message box
                         break
         elif event.type == pygame_gui.UI_BUTTON_PRESSED:
-            if event.ui_element == edit_button:
+            if event.ui_element == load_button:
+                load_game_state()
+            elif event.ui_element == save_button:
+                save_game_state()
+            elif event.ui_element == edit_button:
                 toggle_edit_mode()
-            elif event.ui_element == json_link_button:
-                toggle_json_link_mode()
             elif event.ui_element == image_button:
                 directory = open_file_explorer()
                 if directory:
@@ -793,18 +791,16 @@ while running:
                     current_tile.set_directory(directory)
                     current_image_index = 0  # Reset image index when a new folder is assigned
                     bring_window_to_front()  # Ensure window is brought to the front after loading
-            elif event.ui_element == save_button:
-                save_game_state()
-            elif event.ui_element == load_button:
-                load_game_state()
             elif event.ui_element == delete_button:
                 remove_current_tile_folder()
+            elif event.ui_element == add_folder_button:
+                add_folder()
+            elif event.ui_element == json_link_button:
+                toggle_json_link_mode()
             elif event.ui_element == clear_json_link_button:
                 toggle_clear_json_link_mode()
             elif event.ui_element == edit_text_button:
                 edit_text()
-            elif event.ui_element == add_folder_button:
-                add_folder()
 
         manager.process_events(event)
 
