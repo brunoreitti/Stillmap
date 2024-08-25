@@ -46,6 +46,9 @@ SIDEBAR_WIDTH = BOARD_SIZE + 20  # Width of the sidebar to house the board and b
 NUM_BOARDS = 3  # Number of 9x9 boards in each direction (3x3 grid)
 
 # Colors
+COLOR1 = (40, 42, 54)
+COLOR2 = (68, 71, 90)
+COLOR3 = ()
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 GREEN = (0, 255, 0)
@@ -54,9 +57,9 @@ GRAY = (200, 200, 200)
 LIGHT_GRAY = (220, 220, 220)
 DARK_GRAY = (50, 50, 50)
 BLUE = (0, 0, 255)
-MAIN_BG_COLOR = (50, 50, 50)
-SIDEBAR_BG_COLOR = (150, 150, 150)
-IMAGE_BG_COLOR = (100, 100, 100)
+MAIN_BG_COLOR = (68, 71, 90)
+SIDEBAR_BG_COLOR = (40, 42, 54)
+IMAGE_BG_COLOR = (40, 42, 54)
 ORANGE = (255, 189, 89)
 
 # Player's starting position in the center of the middle board
@@ -134,7 +137,7 @@ class Tile:
         self.col = col
         self.size = size
         self.rect = pygame.Rect(col * size, row * size, size, size)
-        self.color = WHITE
+        self.color = COLOR2
         self.active = True  # Tile is active (can be moved to)
         self.directory = None
         self.image_filenames = []
@@ -145,14 +148,14 @@ class Tile:
     def draw(self, screen, mouse_pos, offset_x, offset_y):
         adjusted_rect = self.rect.move(offset_x, offset_y)
         if adjusted_rect.collidepoint(mouse_pos) and (edit_mode or json_link_mode or clear_json_link_mode):
-            self.color = LIGHT_GRAY
+            self.color = BLACK
         else:
             if self.json_file:
                 self.color = BLUE
             else:
-                self.color = WHITE if self.active else DARK_GRAY
+                self.color = COLOR1 if self.active else BLACK
         pygame.draw.rect(screen, self.color, adjusted_rect)
-        pygame.draw.rect(screen, BLACK, adjusted_rect, 1)
+        pygame.draw.rect(screen, COLOR2, adjusted_rect, 1)
 
     def toggle_active(self):
         self.active = not self.active
@@ -240,7 +243,7 @@ def draw_board(mouse_pos, offset_x, offset_y):
 
 def draw_player(offset_x, offset_y):
     player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE).move(offset_x, offset_y)
-    pygame.draw.rect(screen, ORANGE, player_rect)
+    pygame.draw.rect(screen, COLOR2, player_rect)
     
     # Draw direction arrow
     center_x = player_rect.centerx
@@ -248,21 +251,21 @@ def draw_player(offset_x, offset_y):
     arrow_length = SQUARE_SIZE // 2
     
     if player_direction == 0:  # Up
-        pygame.draw.polygon(screen, DARK_GRAY, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, WHITE, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
     elif player_direction == 1:  # Up-right
-        pygame.draw.polygon(screen, DARK_GRAY, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
     elif player_direction == 2:  # Right
-        pygame.draw.polygon(screen, DARK_GRAY, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
     elif player_direction == 3:  # Down-right
-        pygame.draw.polygon(screen, DARK_GRAY, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
     elif player_direction == 4:  # Down
-        pygame.draw.polygon(screen, DARK_GRAY, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, WHITE, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
     elif player_direction == 5:  # Down-left
-        pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
+        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
     elif player_direction == 6:  # Left
-        pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
     elif player_direction == 7:  # Up-left
-        pygame.draw.polygon(screen, DARK_GRAY, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
+        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
 
 def move_player(forward=True):
     global current_board, temporary_player_pos, temporary_player_direction, temporary_player_orientation, current_loaded_file
