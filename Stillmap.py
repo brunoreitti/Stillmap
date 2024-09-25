@@ -1,169 +1,1070 @@
-import pygame
-import pygame_gui
-import ctypes
-import sys
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog, Menu
 import os
 import json
-from tkinter import Tk, filedialog, simpledialog, messagebox
-import cv2
-import numpy as np
+from PIL import Image, ImageTk
 import subprocess
-
-# Initialize Pygame and Pygame GUI
-pygame.init()
-
-# Create a resizable Pygame window
-screen = pygame.display.set_mode((800, 600), pygame.RESIZABLE)
-pygame.display.set_caption("viewalk software")
-
-icon = pygame.image.load('viewalk.ico')
-pygame.display.set_icon(icon)
-
-# Get the handle of the Pygame window
-window_handle = pygame.display.get_wm_info()["window"]
-
-# Define constants for Windows messages
-SW_MAXIMIZE = 3
-
-# Define the user32 library for sending messages to the window
-user32 = ctypes.windll.user32
-
-# Maximize the window
-user32.ShowWindow(window_handle, SW_MAXIMIZE)
-
-# Get the screen dimensions after maximizing
-screen_width, screen_height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-
-# Bring window to the foreground
-def bring_window_to_front():
-    user32.SetForegroundWindow(window_handle)
 
 # Constants
 BOARD_SIZE = 300  # Size of the board
 ROWS, COLS = 9, 9  # Size of the board
 SQUARE_SIZE = BOARD_SIZE // COLS  # Size of each square
-SIDEBAR_WIDTH = BOARD_SIZE + 20  # Width of the sidebar to house the board and button
 NUM_BOARDS = 3  # Number of 9x9 boards in each direction (3x3 grid)
 
 # Colors
-COLOR1 = (40, 42, 54)
-COLOR2 = (68, 71, 90)
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
-GRAY = (200, 200, 200)
-LIGHT_GRAY = (220, 220, 220)
-DARK_GRAY = (50, 50, 50)
-BLUE = (0, 0, 255)
-MAIN_BG_COLOR = (68, 71, 90)
-SIDEBAR_BG_COLOR = (40, 42, 54)
-IMAGE_BG_COLOR = (40, 42, 54)
-ORANGE = (255, 189, 89)
+COLOR1 = "#282A36"
+COLOR2 = "#44475A"
+WHITE = "#FFFFFF"
+BLACK = "#000000"
+BLUE = "#0000FF"
+MAIN_BG_COLOR = "#44475A"
+IMAGE_BG_COLOR = "#282A36"
+HOVER_COLOR = "#00FF00"  # Green color for hover effect
 
-# Player's starting position in the center of the middle board
-player_pos = [ROWS // 2, COLS // 2]
-player_direction = 0
+# Initialize Tkinter root
+class ViewalkApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Viewalk Software")
+        self.geometry("1200x800")
+        try:
+            self.iconbitmap('viewalk.ico')
+        except:
+            # If 'viewalk.ico' is not found, skip setting the icon
+            pass
 
-# Track which 9x9 board the player is currently in (starting in the center of the larger grid)
-current_board = [NUM_BOARDS // 2, NUM_BOARDS // 2]
+        # Game state variables
+        self.player_pos = [ROWS // 2, COLS // 2]
+        self.player_direction = 0  # Direction the player is facing (0-7)
+        self.current_board = [NUM_BOARDS // 2, NUM_BOARDS // 2]
+        self.current_loaded_file = None
+        self.edit_mode = False
+        self.json_link_mode = False
+        self.clear_json_link_mode = False
+        self.link_area_mode = False  # New mode for adding link areas
 
-# Edit mode toggle
-edit_mode = False
-json_link_mode = False
-clear_json_link_mode = False  # New toggle for clear JSON link mode
+        # Game state directory
+        self.save_directory = "saved_game_states"
+        os.makedirs(self.save_directory, exist_ok=True)
 
-# Temporary variables to store player's position and direction when triggering a link
-temporary_player_pos = None
-temporary_player_direction = None
-temporary_player_orientation = None
+        # Create frames
+        self.create_frames()
 
-# Initialize Tkinter root and hide the main window
-root = Tk()
-root.withdraw()
+        # Create widgets
+        self.create_widgets()
 
-# Image management
-current_image_index = 0
+        # Create the board with Tile objects
+        self.create_boards()
 
-# Define the directory to save and load the game state JSON files
-save_directory = "saved_game_states"
-os.makedirs(save_directory, exist_ok=True)
+        # Bind events
+        self.bind_events()
 
-# Track the currently loaded file
-current_loaded_file = None
+        # Start the update loop
+        self.update_loop()
 
-def open_file_explorer():
-    directory = filedialog.askdirectory()
-    return directory
+    def create_frames(self):
+        # Main frame to hold canvas and buttons
+        self.main_frame = tk.Frame(self)
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-def load_image_with_orientation(filepath):
-    image = cv2.imread(filepath)
-    if image is None:
-        raise ValueError("Image not found or unable to load")
-    try:
-        image_exif = cv2.imread(filepath, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
-        if image_exif is None:
-            raise ValueError("Image not found or unable to load with EXIF")
-        exif_orientation_tag = 274
-        if hasattr(image_exif, 'EXIF'):
-            exif = dict(image_exif.EXIF.items())
-            orientation = exif.get(exif_orientation_tag)
-            if orientation == 3:
-                image = cv2.rotate(image, cv2.ROTATE_180)
-            elif orientation == 6:
-                image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-            elif orientation == 8:
-                image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    except Exception as e:
-        print(f"EXIF orientation handling failed: {e}")
-    return image
+        # Canvas for drawing
+        self.canvas = tk.Canvas(self.main_frame, bg=MAIN_BG_COLOR)
+        self.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-def load_image(filepath):
-    try:
-        return load_image_with_orientation(filepath)
-    except Exception as e:
-        print(f"Failed to load image {filepath}: {e}")
-        return None
+        # Buttons frame
+        self.buttons_frame = tk.Frame(self.main_frame)
+        self.buttons_frame.pack(side=tk.TOP, fill=tk.X)
 
-def cv2_to_pygame(image):
-    """Convert an OpenCV image to a Pygame surface."""
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    return pygame.image.frombuffer(image_rgb.tobytes(), image_rgb.shape[1::-1], 'RGB')
+    def create_widgets(self):
+        # Buttons in the buttons_frame
+        self.load_button = tk.Button(
+            self.buttons_frame, text="Load Game",
+            command=self.load_game_state)
+        self.load_button.pack(pady=5, padx=5, side=tk.LEFT)
 
+        self.save_button = tk.Button(
+            self.buttons_frame, text="Save Game",
+            command=self.save_game_state)
+        self.save_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+        self.edit_button = tk.Button(
+            self.buttons_frame, text="Edit Mode: OFF",
+            command=self.toggle_edit_mode)
+        self.edit_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+        self.image_button = tk.Button(
+            self.buttons_frame, text="Select Image Folder",
+            command=self.select_image_folder)
+        self.image_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+        self.delete_button = tk.Button(
+            self.buttons_frame, text="Remove Image Folder",
+            command=self.remove_current_tile_folder)
+        self.delete_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+        self.edit_text_button = tk.Button(
+            self.buttons_frame, text="Edit Description",
+            command=self.edit_text)
+        self.edit_text_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+        self.json_link_button = tk.Button(
+            self.buttons_frame, text="Manage JSON Links: OFF",
+            command=self.toggle_json_link_mode)
+        self.json_link_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+        self.clear_json_link_button = tk.Button(
+            self.buttons_frame, text="Clear JSON Links: OFF",
+            command=self.toggle_clear_json_link_mode)
+        self.clear_json_link_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+        # Add the "Show Description" button
+        self.show_description_button = tk.Button(
+            self.buttons_frame, text="Show Description",
+            command=self.show_description)
+        self.show_description_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+        # New button to toggle Link Area Mode
+        self.add_link_area_button = tk.Button(
+            self.buttons_frame, text="Add Link Area: OFF",
+            command=self.toggle_link_area_mode)
+        self.add_link_area_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+        # Button to clear link areas
+        self.clear_link_areas_button = tk.Button(
+            self.buttons_frame, text="Clear Link Areas",
+            command=self.clear_link_areas)
+        self.clear_link_areas_button.pack(pady=5, padx=5, side=tk.LEFT)
+
+    def create_boards(self):
+        # Create the boards
+        self.boards = [[[
+            [Tile(row, col, SQUARE_SIZE, self.canvas)
+             for col in range(COLS)]
+            for row in range(ROWS)]
+            for _ in range(NUM_BOARDS)]
+            for _ in range(NUM_BOARDS)]
+
+    def bind_events(self):
+        # Keyboard events
+        self.bind("<Key>", self.on_key_press)
+        # Mouse events on canvas
+        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.bind("<ButtonPress-1>", self.on_canvas_button_press)
+        self.canvas.bind("<B1-Motion>", self.on_canvas_mouse_move)
+        self.canvas.bind("<ButtonRelease-1>", self.on_canvas_button_release)
+        self.canvas.bind("<Button-3>", self.on_canvas_right_click)
+        # Resize event
+        self.canvas.bind("<Configure>", self.on_canvas_resize)
+
+    def on_key_press(self, event):
+        if event.keysym == 'Up':
+            self.move_player(forward=True)
+        elif event.keysym == 'Down':
+            self.move_player(forward=False)
+        elif event.keysym == 'Left':
+            self.rotate_player(left=True)
+        elif event.keysym == 'Right':
+            self.rotate_player(left=False)
+        elif event.char == 'e':
+            self.toggle_edit_mode()
+        elif event.char == 'j':
+            self.toggle_json_link_mode()
+        elif event.char == 'c':
+            self.toggle_clear_json_link_mode()
+        elif event.char == 'i':
+            self.show_image_popup()  # Press 'i' to show image popup
+        elif event.char == 'v':
+            self.open_folder_link()  # Press 'v' to open folder link
+
+    def on_canvas_resize(self, event):
+        # Update image display area on canvas resize
+        self.canvas.delete("image_display_area")
+        self.canvas.create_rectangle(
+            10, 10, event.width - 20, event.height - 20,
+            fill=IMAGE_BG_COLOR, outline="", tags="image_display_area"
+        )
+
+    def update_loop(self):
+        try:
+            # Main update loop
+            self.draw_canvas()
+        except Exception as e:
+            print(f"Exception in update_loop: {e}")
+        self.after(50, self.update_loop)  # Adjust the delay as needed
+
+    def draw_canvas(self):
+        try:
+            # Clear the canvas
+            self.canvas.delete("all")
+            # Draw the image display area
+            self.canvas.create_rectangle(
+                10, 10, self.canvas.winfo_width() - 20,
+                self.canvas.winfo_height() - 20, fill=IMAGE_BG_COLOR,
+                outline=""
+            )
+            # Draw the current image if available
+            self.draw_current_image()
+            # Draw the board
+            self.draw_board()
+            # Draw the player
+            self.draw_player()
+            # Draw the link areas on top
+            self.draw_link_areas()
+            # Update hover state
+            self.update_hover_state()
+        except Exception as e:
+            print(f"Exception in draw_canvas: {e}")
+
+    def draw_current_image(self):
+        try:
+            current_tile = self.get_current_tile()
+            if current_tile.image_filenames:
+                if len(current_tile.image_filenames) == 8:
+                    # Map player's direction to image index
+                    image_index = self.player_direction
+                else:
+                    # If fewer images, default to the first image
+                    image_index = 0
+                current_image = current_tile.get_current_image(
+                    image_index)
+                if current_image:
+                    # Resize image to fit the display area
+                    img_width, img_height = current_image.size
+                    display_width = self.canvas.winfo_width() - 40
+                    display_height = self.canvas.winfo_height() - 40
+                    scale_factor = min(
+                        display_width / img_width,
+                        display_height / img_height)
+                    new_width = int(img_width * scale_factor)
+                    new_height = int(img_height * scale_factor)
+                    resized_image = current_image.resize(
+                        (new_width, new_height), Image.LANCZOS)
+                    self.photo_image = ImageTk.PhotoImage(resized_image)
+                    # Calculate position
+                    x = (display_width - new_width) // 2 + 10
+                    y = (display_height - new_height) // 2 + 10
+                    self.canvas.create_image(
+                        x, y, anchor=tk.NW, image=self.photo_image)
+                    # Store the image area coordinates
+                    self.image_area_coords = (
+                        x, y, x + new_width, y + new_height)
+                else:
+                    print("No current image to display.")
+            else:
+                print("No image filenames available for the current tile.")
+        except Exception as e:
+            print(f"Exception in draw_current_image: {e}")
+
+    def draw_board(self):
+        try:
+            # Adjusted offset since sidebar is removed
+            offset_x = self.canvas.winfo_width() - BOARD_SIZE - 10
+            offset_y = 60
+            board = self.get_current_board()
+            for row in board:
+                for tile in row:
+                    tile.draw(
+                        self.canvas, offset_x, offset_y,
+                        self.edit_mode, self.json_link_mode,
+                        self.clear_json_link_mode)
+        except Exception as e:
+            print(f"Exception in draw_board: {e}")
+
+    def draw_player(self):
+        try:
+            # Adjusted offset since sidebar is removed
+            offset_x = self.canvas.winfo_width() - BOARD_SIZE - 10
+            offset_y = 60
+            player_rect = (
+                self.player_pos[1] * SQUARE_SIZE + offset_x,
+                self.player_pos[0] * SQUARE_SIZE + offset_y,
+                SQUARE_SIZE, SQUARE_SIZE,
+            )
+            x, y, w, h = player_rect
+            # Draw player rectangle
+            self.canvas.create_rectangle(
+                x, y, x + w, y + h, fill=COLOR2)
+            # Draw direction arrow
+            center_x = x + w / 2
+            center_y = y + h / 2
+            arrow_length = SQUARE_SIZE // 2
+            direction = self.player_direction
+            points = []
+            if direction == 0:  # Up
+                points = [
+                    center_x, center_y - arrow_length,
+                    center_x - 10, center_y + 10,
+                    center_x + 10, center_y + 10]
+            elif direction == 1:  # Up-right
+                points = [
+                    center_x + arrow_length, center_y - arrow_length,
+                    center_x - 10, center_y + 10,
+                    center_x + 10, center_y + 10]
+            elif direction == 2:  # Right
+                points = [
+                    center_x + arrow_length, center_y,
+                    center_x - 10, center_y - 10,
+                    center_x - 10, center_y + 10]
+            elif direction == 3:  # Down-right
+                points = [
+                    center_x + arrow_length, center_y + arrow_length,
+                    center_x - 10, center_y + 10,
+                    center_x + 10, center_y - 10]
+            elif direction == 4:  # Down
+                points = [
+                    center_x, center_y + arrow_length,
+                    center_x - 10, center_y - 10,
+                    center_x + 10, center_y - 10]
+            elif direction == 5:  # Down-left
+                points = [
+                    center_x - arrow_length, center_y + arrow_length,
+                    center_x + 10, center_y + 10,
+                    center_x - 10, center_y - 10]
+            elif direction == 6:  # Left
+                points = [
+                    center_x - arrow_length, center_y,
+                    center_x + 10, center_y - 10,
+                    center_x + 10, center_y + 10]
+            elif direction == 7:  # Up-left
+                points = [
+                    center_x - arrow_length, center_y - arrow_length,
+                    center_x + 10, center_y + 10,
+                    center_x - 10, center_y + 10]
+            if points:
+                self.canvas.create_polygon(points, fill=WHITE)
+            else:
+                # If points are empty, draw a small circle
+                self.canvas.create_oval(
+                    center_x - 5, center_y - 5,
+                    center_x + 5, center_y + 5, fill=WHITE)
+        except Exception as e:
+            print(f"Exception in draw_player: {e}")
+
+    def draw_link_areas(self):
+        try:
+            current_tile = self.get_current_tile()
+            if not current_tile.link_areas:
+                return
+            self.link_area_rects = []
+            for idx, area in enumerate(current_tile.link_areas):
+                rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
+                x0 = self.image_area_coords[0] + rel_x0 * (
+                    self.image_area_coords[2]
+                    - self.image_area_coords[0])
+                y0 = self.image_area_coords[1] + rel_y0 * (
+                    self.image_area_coords[3]
+                    - self.image_area_coords[1])
+                x1 = self.image_area_coords[0] + rel_x1 * (
+                    self.image_area_coords[2]
+                    - self.image_area_coords[0])
+                y1 = self.image_area_coords[1] + rel_y1 * (
+                    self.image_area_coords[3]
+                    - self.image_area_coords[1])
+                # Create a semi-transparent fill using stipple
+                rect_id = self.canvas.create_rectangle(
+                    x0, y0, x1, y1,
+                    outline='', fill='gray12', stipple='gray25',
+                    tags=f"link_area_{idx}"
+                )
+                # Bind events to the rectangle
+                self.canvas.tag_bind(
+                    rect_id, "<Enter>",
+                    lambda e, idx=idx: self.on_link_area_hover(idx, True))
+                self.canvas.tag_bind(
+                    rect_id, "<Leave>",
+                    lambda e, idx=idx: self.on_link_area_hover(idx, False))
+                self.canvas.tag_bind(
+                    rect_id, "<Button-1>",
+                    lambda e, idx=idx: self.open_link_area_by_index(idx))
+                # Store rectangle info
+                self.link_area_rects.append({
+                    'id': rect_id,
+                    'area_index': idx,
+                    'coords': (x0, y0, x1, y1)
+                })
+        except Exception as e:
+            print(f"Exception in draw_link_areas: {e}")
+
+    def on_link_area_hover(self, idx, is_hover):
+        try:
+            rect = self.link_area_rects[idx]
+            rect_id = rect['id']
+            if is_hover:
+                self.canvas.itemconfig(rect_id, outline=HOVER_COLOR, width=2)
+            else:
+                self.canvas.itemconfig(rect_id, outline='', width=1)
+        except Exception as e:
+            print(f"Exception in on_link_area_hover: {e}")
+
+    def update_hover_state(self):
+        # This method can be kept empty or used for additional hover logic
+        pass  # Since hover is handled via tag bindings
+
+    def on_canvas_click(self, event):
+        # The click is already handled via tag_bind on rectangles
+        # This can be used for other click functionalities if needed
+        pass  # No action needed here for link areas
+
+    def handle_board_click(self, event):
+        # Adjusted offset since sidebar is removed
+        offset_x = self.canvas.winfo_width() - BOARD_SIZE - 10
+        offset_y = 60
+        x = event.x - offset_x
+        y = event.y - offset_y
+        if x < 0 or y < 0:
+            return
+        col = int(x // SQUARE_SIZE)
+        row = int(y // SQUARE_SIZE)
+        if 0 <= row < ROWS and 0 <= col < COLS:
+            tile = self.get_current_board()[row][col]
+            if self.edit_mode:
+                tile.toggle_active()
+            elif self.json_link_mode:
+                selected_file = filedialog.askopenfilename(
+                    title="Select a JSON file",
+                    initialdir=self.save_directory,
+                    filetypes=[("JSON files", "*.json")])
+                if selected_file:
+                    tile.set_json_file(selected_file)
+            elif self.clear_json_link_mode:
+                tile.clear_json_file()
+                tile.color = WHITE  # Reset color to indicate no link
+            else:
+                # In normal mode, maybe select the tile or perform actions
+                pass
+
+    def on_canvas_button_press(self, event):
+        if self.link_area_mode:
+            # Check if click is within image area
+            if hasattr(self, 'image_area_coords'):
+                x0, y0, x1, y1 = self.image_area_coords
+                if x0 <= event.x <= x1 and y0 <= event.y <= y1:
+                    # Record the starting position
+                    self.link_area_start = (event.x, event.y)
+                    # Create a temporary rectangle
+                    self.temp_rect = self.canvas.create_rectangle(
+                        event.x, event.y, event.x, event.y,
+                        outline='red', dash=(2, 2))
+                else:
+                    self.link_area_start = None
+            else:
+                self.link_area_start = None
+
+    def on_canvas_mouse_move(self, event):
+        if self.link_area_mode and hasattr(
+                self, 'temp_rect') and self.link_area_start:
+            # Update the temporary rectangle
+            self.canvas.coords(
+                self.temp_rect, self.link_area_start[0],
+                self.link_area_start[1], event.x, event.y)
+
+    def on_canvas_button_release(self, event):
+        if self.link_area_mode and hasattr(
+                self, 'temp_rect') and self.link_area_start:
+            # Finalize the rectangle
+            x0, y0 = self.link_area_start
+            x1, y1 = event.x, event.y
+            # Remove the temporary rectangle
+            self.canvas.delete(self.temp_rect)
+            delattr(self, 'temp_rect')
+
+            # Ensure coordinates are in the correct order
+            x0, x1 = sorted([x0, x1])
+            y0, y1 = sorted([y0, y1])
+
+            # Store the rectangle coordinates relative to the image
+            if hasattr(self, 'image_area_coords'):
+                img_x0, img_y0, img_x1, img_y1 = self.image_area_coords
+                # Ensure the rectangle is within the image area
+                x0 = max(x0, img_x0)
+                y0 = max(y0, img_y0)
+                x1 = min(x1, img_x1)
+                y1 = min(y1, img_y1)
+                # Convert to relative coordinates (0 to 1)
+                rel_x0 = (x0 - img_x0) / (img_x1 - img_x0)
+                rel_y0 = (y0 - img_y0) / (img_y1 - img_y0)
+                rel_x1 = (x1 - img_x0) / (img_x1 - img_x0)
+                rel_y1 = (y1 - img_y0) / (img_y1 - img_y0)
+                # Store in current tile
+                current_tile = self.get_current_tile()
+                # Create a new link area without a link yet
+                current_tile.add_link_area({
+                    'coords': (rel_x0, rel_y0, rel_x1, rel_y1),
+                    'link': None})
+            else:
+                messagebox.showwarning(
+                    "Add Link Area",
+                    "No image available to add link area.")
+            self.link_area_start = None
+            self.draw_canvas()  # Redraw to show the new link area
+
+    def on_canvas_right_click(self, event):
+        if self.link_area_mode:
+            # Check if right-click is on a link area
+            for rect_info in getattr(self, 'link_area_rects', []):
+                x0, y0, x1, y1 = rect_info['coords']
+                area_index = rect_info['area_index']
+                if x0 <= event.x <= x1 and y0 <= event.y <= y1:
+                    # Right-clicked inside this link area
+                    self.show_context_menu(event, area_index)
+                    return  # No need to check other areas
+        else:
+            # Handle other right-click events if necessary
+            pass
+
+    def show_context_menu(self, event, area_index):
+        # Create a context menu
+        context_menu = Menu(self, tearoff=0)
+        context_menu.add_command(
+            label="Add link to this",
+            command=lambda idx=area_index: self.add_link_to_area(idx))
+        context_menu.post(event.x_root, event.y_root)
+
+    def add_link_to_area(self, area_index):
+        directory = filedialog.askdirectory()
+        if directory:
+            current_tile = self.get_current_tile()
+            area = current_tile.link_areas[area_index]
+            area['link'] = directory
+            print(f"Assigned link to area: {area}")
+            self.draw_canvas()  # Redraw to reflect the added link
+
+    def toggle_edit_mode(self):
+        self.edit_mode = not self.edit_mode
+        self.edit_button.config(
+            text=f"Edit Mode: {'ON' if self.edit_mode else 'OFF'}")
+        # Turn off other modes
+        if self.edit_mode:
+            self.link_area_mode = False
+            self.json_link_mode = False
+            self.clear_json_link_mode = False
+            self.add_link_area_button.config(text="Add Link Area: OFF")
+            self.json_link_button.config(text="Manage JSON Links: OFF")
+            self.clear_json_link_button.config(
+                text="Clear JSON Links: OFF")
+
+    def toggle_json_link_mode(self):
+        self.json_link_mode = not self.json_link_mode
+        self.clear_json_link_mode = False
+        self.json_link_button.config(
+            text=f"Manage JSON Links: {'ON' if self.json_link_mode else 'OFF'}")
+        self.clear_json_link_button.config(
+            text="Clear JSON Links: OFF")
+        # Turn off other modes
+        if self.json_link_mode:
+            self.edit_mode = False
+            self.link_area_mode = False
+            self.edit_button.config(text="Edit Mode: OFF")
+            self.add_link_area_button.config(text="Add Link Area: OFF")
+
+    def toggle_clear_json_link_mode(self):
+        self.clear_json_link_mode = not self.clear_json_link_mode
+        self.json_link_mode = False
+        self.clear_json_link_button.config(
+            text=f"Clear JSON Links: {'ON' if self.clear_json_link_mode else 'OFF'}")
+        self.json_link_button.config(text="Manage JSON Links: OFF")
+        # Turn off other modes
+        if self.clear_json_link_mode:
+            self.edit_mode = False
+            self.link_area_mode = False
+            self.edit_button.config(text="Edit Mode: OFF")
+            self.add_link_area_button.config(text="Add Link Area: OFF")
+
+    def toggle_link_area_mode(self):
+        self.link_area_mode = not self.link_area_mode
+        self.add_link_area_button.config(
+            text=f"Add Link Area: {'ON' if self.link_area_mode else 'OFF'}")
+        # Turn off other modes
+        if self.link_area_mode:
+            self.edit_mode = False
+            self.json_link_mode = False
+            self.clear_json_link_mode = False
+            self.edit_button.config(text="Edit Mode: OFF")
+            self.json_link_button.config(text="Manage JSON Links: OFF")
+            self.clear_json_link_button.config(
+                text="Clear JSON Links: OFF")
+
+    def clear_link_areas(self):
+        current_tile = self.get_current_tile()
+        current_tile.clear_link_areas()
+        self.draw_canvas()  # Redraw to reflect the changes
+
+    def move_player(self, forward=True):
+        new_pos = self.player_pos[:]
+        direction = self.player_direction if forward else (
+            self.player_direction + 4) % 8  # Adjust for backward
+
+        if direction == 0:  # Up
+            new_pos[0] -= 1
+        elif direction == 1:  # Up-right
+            new_pos[0] -= 1
+            new_pos[1] += 1
+        elif direction == 2:  # Right
+            new_pos[1] += 1
+        elif direction == 3:  # Down-right
+            new_pos[0] += 1
+            new_pos[1] += 1
+        elif direction == 4:  # Down
+            new_pos[0] += 1
+        elif direction == 5:  # Down-left
+            new_pos[0] += 1
+            new_pos[1] -= 1
+        elif direction == 6:  # Left
+            new_pos[1] -= 1
+        elif direction == 7:  # Up-left
+            new_pos[0] -= 1
+            new_pos[1] -= 1
+
+        new_board = self.current_board[:]
+        print(f"Attempting to move to position: {new_pos} on board: "
+              f"{new_board}")
+
+        # Check for board transitions
+        if new_pos[0] < 0:
+            if self.current_board[0] > 0:
+                new_pos[0] = ROWS - 1
+                new_board[0] -= 1
+            else:
+                new_pos[0] = 0
+        elif new_pos[0] >= ROWS:
+            if self.current_board[0] < NUM_BOARDS - 1:
+                new_pos[0] = 0
+                new_board[0] += 1
+            else:
+                new_pos[0] = ROWS - 1
+        if new_pos[1] < 0:
+            if self.current_board[1] > 0:
+                new_pos[1] = COLS - 1
+                new_board[1] -= 1
+            else:
+                new_pos[1] = 0
+        elif new_pos[1] >= COLS:
+            if self.current_board[1] < NUM_BOARDS - 1:
+                new_pos[1] = 0
+                new_board[1] += 1
+            else:
+                new_pos[1] = COLS - 1
+
+        # Check if the new position is in an active tile
+        if new_board != self.current_board:
+            if self.boards[new_board[0]][new_board[1]][new_pos[0]][
+                    new_pos[1]].active:
+                self.current_board[:] = new_board
+                self.player_pos[:] = new_pos
+                print(f"Moved to new board: {new_board}, new position: "
+                      f"{new_pos}")
+            else:
+                print("Cannot move to inactive tile.")
+        else:
+            if self.get_current_board()[new_pos[0]][new_pos[1]].active:
+                self.player_pos[:] = new_pos
+                print(f"Moved to position: {new_pos}")
+            else:
+                print("Cannot move to inactive tile.")
+
+    def rotate_player(self, left=True):
+        if left:
+            self.player_direction = (self.player_direction - 1) % 8
+        else:
+            self.player_direction = (self.player_direction + 1) % 8
+        self.current_image_index = self.player_direction  # Sync image index
+
+    def select_image_folder(self):
+        directory = filedialog.askdirectory()
+        if directory:
+            current_tile = self.get_current_tile()
+            current_tile.set_directory(directory)
+            self.current_image_index = self.player_direction
+
+    def remove_current_tile_folder(self):
+        current_tile = self.get_current_tile()
+        current_tile.clear_directory()
+        self.draw_canvas()  # Redraw to reflect the changes
+
+    def edit_text(self):
+        current_tile = self.get_current_tile()
+        new_text = simpledialog.askstring(
+            "Edit Description", "Enter new text:",
+            initialvalue=current_tile.text_content)
+        if new_text is not None:
+            current_tile.text_content = new_text
+
+    def show_description(self):
+        current_tile = self.get_current_tile()
+        description_window = tk.Toplevel(self)
+        description_window.title("Tile Description")
+        description_window.geometry("400x300")
+
+        text_widget = tk.Text(description_window, wrap=tk.WORD)
+        text_widget.pack(expand=True, fill=tk.BOTH)
+
+        # Insert text content
+        text_content = current_tile.text_content or "No description."
+        text_widget.insert(tk.END, text_content)
+
+        # Add folder link if exists
+        if current_tile.folder_link:
+            text_widget.insert(tk.END, "\nFolder Link:\n")
+            text_widget.insert(
+                tk.END, current_tile.folder_link + "\n", ("link",))
+            text_widget.tag_configure(
+                "link", foreground="blue", underline=True)
+            text_widget.tag_bind(
+                "link", "<Button-1>", lambda e: self.open_folder_link())
+
+        # Display link areas and their links
+        if current_tile.link_areas:
+            text_widget.insert(tk.END, "\nLink Areas:\n")
+            for idx, area in enumerate(current_tile.link_areas):
+                link = area.get('link')
+                if link:
+                    tag_name = f"link_area_{idx}"
+                    text_widget.insert(
+                        tk.END, f"Area {idx + 1}: {link}\n", (tag_name,))
+                    # Bind each link to open the folder
+                    text_widget.tag_configure(
+                        tag_name, foreground="blue", underline=True)
+                    text_widget.tag_bind(
+                        tag_name, "<Button-1>",
+                        lambda e, idx=idx:
+                        self.open_link_area_by_index(idx))
+                else:
+                    text_widget.insert(
+                        tk.END, f"Area {idx + 1}: No link assigned\n")
+
+        text_widget.config(state=tk.DISABLED)
+
+    def open_folder_link(self):
+        current_tile = self.get_current_tile()
+        link = current_tile.folder_link
+        if link and os.path.isdir(link):
+            try:
+                # Replace 'python' with 'python3' if necessary
+                subprocess.Popen(['python', 'image_viewer.py', link])
+            except Exception as e:
+                print(f"Error opening folder link: {e}")
+        else:
+            messagebox.showwarning(
+                "Folder Link", "No valid folder link found for this tile.")
+
+    def open_link_area(self, area):
+        link = area.get('link')
+        print(f"Attempting to open link: {link}")
+        if link and os.path.isdir(link):
+            try:
+                subprocess.Popen(['python', 'image_viewer.py', link])
+            except Exception as e:
+                print(f"Error opening folder link: {e}")
+        else:
+            print(f"No valid folder link found for this area: {link}")
+            messagebox.showwarning(
+                "Folder Link", "No valid folder link found for this area.")
+
+    def open_link_area_by_index(self, area_index):
+        current_tile = self.get_current_tile()
+        area = current_tile.link_areas[area_index]
+        self.open_link_area(area)
+
+    def save_game_state(self):
+        if self.current_loaded_file is None:
+            filename = simpledialog.askstring(
+                "Save Game", "Enter the save file name:")
+            if not filename:
+                messagebox.showwarning(
+                    "Save Game", "Save file name cannot be empty.")
+                return
+            self.current_loaded_file = os.path.join(
+                self.save_directory, f"{filename}.json")
+
+        game_state = {
+            "player_position": self.player_pos,
+            "player_direction": self.player_direction,
+            "current_board": self.current_board,
+            "tiles": []
+        }
+
+        for board_row in self.boards:
+            for board in board_row:
+                for row in board:
+                    for tile in row:
+                        tile_data = {
+                            "row": tile.row,
+                            "col": tile.col,
+                            "board_row": self.boards.index(board_row),
+                            "board_col": board_row.index(board),
+                            "active": tile.active,
+                            "directory": tile.directory,
+                            "json_file": tile.json_file,
+                            "text_content": tile.text_content,
+                            "folder_link": tile.folder_link,
+                            "link_areas": tile.link_areas  # Save link areas
+                        }
+                        game_state["tiles"].append(tile_data)
+
+        with open(self.current_loaded_file, "w") as file:
+            json.dump(game_state, file, indent=4)
+        print("Game state saved.")
+
+    def load_game_state(self):
+        files = [f for f in os.listdir(
+            self.save_directory) if f.endswith(".json")]
+        if not files:
+            messagebox.showwarning(
+                "Load Game", "No saved games found.")
+            return
+
+        selected_file = filedialog.askopenfilename(
+            title="Select a saved game",
+            initialdir=self.save_directory,
+            filetypes=[("JSON files", "*.json")]
+        )
+
+        if not selected_file:
+            return
+
+        self.current_loaded_file = selected_file
+        self.load_game_state_from_file(selected_file)
+
+    def load_game_state_from_file(self, filepath):
+        try:
+            with open(filepath, "r") as file:
+                game_state = json.load(file)
+
+            self.player_pos = game_state["player_position"]
+            self.player_direction = game_state["player_direction"]
+            self.current_board = game_state["current_board"]
+
+            # Validate player position and current board
+            self.player_pos[0] = max(
+                0, min(self.player_pos[0], ROWS - 1))
+            self.player_pos[1] = max(
+                0, min(self.player_pos[1], COLS - 1))
+            self.current_board[0] = max(
+                0, min(self.current_board[0], NUM_BOARDS - 1))
+            self.current_board[1] = max(
+                0, min(self.current_board[1], NUM_BOARDS - 1))
+
+            # Clear the current game state
+            for board_row in self.boards:
+                for board in board_row:
+                    for row in board:
+                        for tile in row:
+                            tile.active = True
+                            tile.clear_directory()
+                            tile.clear_json_file()
+                            tile.text_content = ""
+                            tile.folder_link = None
+                            tile.clear_link_areas()
+
+            for tile_data in game_state["tiles"]:
+                board_row = tile_data["board_row"]
+                board_col = tile_data["board_col"]
+                row = tile_data["row"]
+                col = tile_data["col"]
+                tile = self.boards[board_row][board_col][row][col]
+                tile_active = tile_data.get("active", True)
+                tile.active = bool(tile_active)
+                tile.set_directory(tile_data.get("directory"))
+                tile.json_file = tile_data.get("json_file")
+                tile.text_content = tile_data.get("text_content", "")
+                tile.folder_link = tile_data.get("folder_link", None)
+                tile.link_areas = tile_data.get("link_areas", [])
+
+            self.current_image_index = self.player_direction
+            print("Game state loaded.")
+
+        except Exception as e:
+            print(f"Error loading game state: {e}")
+            messagebox.showerror(
+                "Load Game", f"Error loading game state: {e}")
+
+    def get_current_board(self):
+        return self.boards[self.current_board[0]][self.current_board[1]]
+
+    def get_current_tile(self):
+        return self.get_current_board()[self.player_pos[0]][
+            self.player_pos[1]]
+
+    def draw_link_areas(self):
+        try:
+            current_tile = self.get_current_tile()
+            if not current_tile.link_areas:
+                return
+            self.link_area_rects = []
+            for idx, area in enumerate(current_tile.link_areas):
+                rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
+                x0 = self.image_area_coords[0] + rel_x0 * (
+                    self.image_area_coords[2]
+                    - self.image_area_coords[0])
+                y0 = self.image_area_coords[1] + rel_y0 * (
+                    self.image_area_coords[3]
+                    - self.image_area_coords[1])
+                x1 = self.image_area_coords[0] + rel_x1 * (
+                    self.image_area_coords[2]
+                    - self.image_area_coords[0])
+                y1 = self.image_area_coords[1] + rel_y1 * (
+                    self.image_area_coords[3]
+                    - self.image_area_coords[1])
+                # Create a semi-transparent fill using stipple
+                rect_id = self.canvas.create_rectangle(
+                    x0, y0, x1, y1,
+                    outline='', fill='gray12', stipple='gray25',
+                    tags=f"link_area_{idx}"
+                )
+                # Bind events to the rectangle
+                self.canvas.tag_bind(
+                    rect_id, "<Enter>",
+                    lambda e, idx=idx: self.on_link_area_hover(idx, True))
+                self.canvas.tag_bind(
+                    rect_id, "<Leave>",
+                    lambda e, idx=idx: self.on_link_area_hover(idx, False))
+                self.canvas.tag_bind(
+                    rect_id, "<Button-1>",
+                    lambda e, idx=idx: self.open_link_area_by_index(idx))
+                # Store rectangle info
+                self.link_area_rects.append({
+                    'id': rect_id,
+                    'area_index': idx,
+                    'coords': (x0, y0, x1, y1)
+                })
+        except Exception as e:
+            print(f"Exception in draw_link_areas: {e}")
+
+    def on_link_area_hover(self, idx, is_hover):
+        try:
+            rect = self.link_area_rects[idx]
+            rect_id = rect['id']
+            if is_hover:
+                self.canvas.itemconfig(rect_id, outline=HOVER_COLOR, width=2)
+            else:
+                self.canvas.itemconfig(rect_id, outline='', width=1)
+        except Exception as e:
+            print(f"Exception in on_link_area_hover: {e}")
+
+    def update_hover_state(self):
+        # This method can be kept empty or used for additional hover logic
+        pass  # Since hover is handled via tag bindings
+
+    def on_canvas_click(self, event):
+        # The click is already handled via tag_bind on rectangles
+        # This can be used for other click functionalities if needed
+        pass  # No action needed here for link areas
+
+    def handle_board_click(self, event):
+        # Adjusted offset since sidebar is removed
+        offset_x = self.canvas.winfo_width() - BOARD_SIZE - 10
+        offset_y = 60
+        x = event.x - offset_x
+        y = event.y - offset_y
+        if x < 0 or y < 0:
+            return
+        col = int(x // SQUARE_SIZE)
+        row = int(y // SQUARE_SIZE)
+        if 0 <= row < ROWS and 0 <= col < COLS:
+            tile = self.get_current_board()[row][col]
+            if self.edit_mode:
+                tile.toggle_active()
+            elif self.json_link_mode:
+                selected_file = filedialog.askopenfilename(
+                    title="Select a JSON file",
+                    initialdir=self.save_directory,
+                    filetypes=[("JSON files", "*.json")])
+                if selected_file:
+                    tile.set_json_file(selected_file)
+            elif self.clear_json_link_mode:
+                tile.clear_json_file()
+                tile.color = WHITE  # Reset color to indicate no link
+            else:
+                # In normal mode, maybe select the tile or perform actions
+                pass
+
+    def show_image_popup(self):
+        # Open a popup window to display the image
+        try:
+            current_tile = self.get_current_tile()
+            if current_tile.image_filenames:
+                if len(current_tile.image_filenames) == 8:
+                    image_index = self.player_direction
+                else:
+                    image_index = 0
+                current_image = current_tile.get_current_image(
+                    image_index)
+                if current_image:
+                    image_window = tk.Toplevel(self)
+                    image_window.title("Image Viewer")
+                    image_window.geometry("800x600")
+                    # Resize image to fit the popup window
+                    img_width, img_height = current_image.size
+                    scale_factor = min(800 / img_width, 600 / img_height)
+                    new_width = int(img_width * scale_factor)
+                    new_height = int(img_height * scale_factor)
+                    resized_image = current_image.resize(
+                        (new_width, new_height), Image.LANCZOS)
+                    photo_image = ImageTk.PhotoImage(resized_image)
+                    image_label = tk.Label(
+                        image_window, image=photo_image)
+                    image_label.image = photo_image  # Keep reference
+                    image_label.pack(expand=True, fill=tk.BOTH)
+                else:
+                    messagebox.showinfo(
+                        "Image Viewer", "No image to display.")
+            else:
+                messagebox.showinfo(
+                    "Image Viewer",
+                    "No images available for the current tile.")
+        except Exception as e:
+            print(f"Exception in show_image_popup: {e}")
+
+# Define the Tile class
 class Tile:
-    def __init__(self, row, col, size):
+    def __init__(self, row, col, size, canvas):
         self.row = row
         self.col = col
         self.size = size
-        self.rect = pygame.Rect(col * size, row * size, size, size)
+        self.canvas = canvas
+        self.rect = None
         self.color = COLOR2
         self.active = True  # Tile is active (can be moved to)
         self.directory = None
         self.image_filenames = []
-        self.json_file = None  # New attribute to store the associated JSON file
-        self.text_content = ""  # New attribute to store the text content
-        self.folder_link = None  # New attribute to store the folder link
+        self.json_file = None
+        self.text_content = ""
+        self.folder_link = None
+        self.link_areas = []  # List of dictionaries with 'coords' and 'link'
 
-    def draw(self, screen, mouse_pos, offset_x, offset_y):
-        adjusted_rect = self.rect.move(offset_x, offset_y)
-        if adjusted_rect.collidepoint(mouse_pos) and (edit_mode or json_link_mode or clear_json_link_mode):
-            self.color = BLACK
+    def draw(self, canvas, offset_x, offset_y, edit_mode,
+             json_link_mode, clear_json_link_mode):
+        x = self.col * self.size + offset_x
+        y = self.row * self.size + offset_y
+        x1 = x + self.size
+        y1 = y + self.size
+        if self.json_file:
+            fill_color = BLUE
         else:
-            if self.json_file:
-                self.color = BLUE
-            else:
-                self.color = COLOR1 if self.active else BLACK
-        pygame.draw.rect(screen, self.color, adjusted_rect)
-        pygame.draw.rect(screen, COLOR2, adjusted_rect, 1)
+            fill_color = COLOR1 if self.active else BLACK
+        self.rect = canvas.create_rectangle(
+            x, y, x1, y1, fill=fill_color, outline=COLOR2)
+        # If in edit mode and mouse over tile, change color
+        if edit_mode or json_link_mode or clear_json_link_mode:
+            canvas.tag_bind(
+                self.rect, "<Enter>",
+                lambda e: canvas.itemconfig(self.rect, fill=BLACK))
+            canvas.tag_bind(
+                self.rect, "<Leave>",
+                lambda e: canvas.itemconfig(self.rect, fill=fill_color))
 
     def toggle_active(self):
         self.active = not self.active
-        self.color = WHITE if self.active else BLACK
 
     def set_directory(self, directory):
         self.directory = directory
         if directory:
-            self.image_filenames = [f for f in os.listdir(directory) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
+            self.image_filenames = [
+                f for f in os.listdir(directory) if f.lower().endswith(
+                    ('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
+            self.image_filenames.sort()  # Ensure consistent order
+        else:
+            self.image_filenames = []
 
     def clear_directory(self):
         self.directory = None
@@ -175,683 +1076,32 @@ class Tile:
     def clear_json_file(self):
         self.json_file = None
 
-    def set_folder_link(self, link):
-        self.folder_link = link
+    def add_link_area(self, area):
+        self.link_areas.append(area)
+
+    def clear_link_areas(self):
+        self.link_areas = []
 
     def get_current_image(self, index):
         if not self.directory or index >= len(self.image_filenames):
             return None
-        filepath = os.path.join(self.directory, self.image_filenames[index])
-        image = load_image(filepath)
+        filepath = os.path.join(self.directory,
+                                self.image_filenames[index])
+        print(f"Loading image at: {filepath}")  # Debug statement
+        image = self.load_image(filepath)
         if image is not None:
             return image
         return None
 
-    def get_json_text(self):
-        if self.json_file:
-            try:
-                with open(self.json_file, 'r') as file:
-                    data = json.load(file)
-                    return json.dumps(data, indent=2)
-            except Exception as e:
-                return f"Error loading JSON: {e}"
-        return "No JSON linked."
-
-class SidebarContainer:
-    def __init__(self, x, y, width, height, padding=10, offset=0):
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
-        self.padding = padding
-        self.offset = offset
-        self.elements = []
-        self.total_height = 0
-
-    def add_element(self, element):
-        self.elements.append(element)
-        self.total_height += element.get_relative_rect().height + self.padding
-        self.reposition_elements()
-
-    def reposition_elements(self):
-        current_y = self.y + self.height - self.padding - self.offset
-        for element in reversed(self.elements):
-            rect = element.get_relative_rect()
-            rect.topleft = (self.x + self.padding, current_y - rect.height)
-            element.set_relative_position((self.x + self.padding, current_y - rect.height))
-            current_y -= rect.height + self.padding
-
-# Create the board with Tile objects for each 9x9 grid in the 3x3 grid
-boards = [[[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS)] for _ in range(NUM_BOARDS)]
-
-def get_board(board_index):
-    return boards[board_index // NUM_BOARDS][board_index % NUM_BOARDS]
-
-def get_current_board():
-    board_index = current_board[0] * NUM_BOARDS + current_board[1]
-    return get_board(board_index)
-
-def get_current_tile():
-    return get_current_board()[player_pos[0]][player_pos[1]]
-
-def draw_board(mouse_pos, offset_x, offset_y):
-    board = get_current_board()
-    for row in board:
-        for tile in row:
-            tile.draw(screen, mouse_pos, offset_x, offset_y)
-
-def draw_player(offset_x, offset_y):
-    player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE).move(offset_x, offset_y)
-    pygame.draw.rect(screen, COLOR2, player_rect)
-    
-    # Draw direction arrow
-    center_x = player_rect.centerx
-    center_y = player_rect.centery
-    arrow_length = SQUARE_SIZE // 2
-    
-    if player_direction == 0:  # Up
-        pygame.draw.polygon(screen, WHITE, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
-    elif player_direction == 1:  # Up-right
-        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
-    elif player_direction == 2:  # Right
-        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
-    elif player_direction == 3:  # Down-right
-        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
-    elif player_direction == 4:  # Down
-        pygame.draw.polygon(screen, WHITE, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
-    elif player_direction == 5:  # Down-left
-        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
-    elif player_direction == 6:  # Left
-        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
-    elif player_direction == 7:  # Up-left
-        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
-
-def move_player(forward=True):
-    global current_board, temporary_player_pos, temporary_player_direction, temporary_player_orientation, current_loaded_file
-
-    new_pos = player_pos[:]
-    direction = player_direction if forward else (player_direction + 4) % 8  # Adjust direction for backward movement
-
-    if direction == 0:  # Up
-        new_pos[0] -= 1
-    elif direction == 1:  # Up-right
-        new_pos[0] -= 1
-        new_pos[1] += 1
-    elif direction == 2:  # Right
-        new_pos[1] += 1
-    elif direction == 3:  # Down-right
-        new_pos[0] += 1
-        new_pos[1] += 1
-    elif direction == 4:  # Down
-        new_pos[0] += 1
-    elif direction == 5:  # Down-left
-        new_pos[0] += 1
-        new_pos[1] -= 1
-    elif direction == 6:  # Left
-        new_pos[1] -= 1
-    elif direction == 7:  # Up-left
-        new_pos[0] -= 1
-        new_pos[1] -= 1
-
-    new_board = current_board[:]
-    print(f"Attempting to move to position: {new_pos} on board: {new_board}")
-
-    # Check for board transitions
-    if new_pos[0] < 0:
-        if current_board[0] > 0:
-            new_pos[0] = ROWS - 1
-            new_board[0] -= 1
-        else:
-            new_pos[0] = 0
-    elif new_pos[0] >= ROWS:
-        if current_board[0] < NUM_BOARDS - 1:
-            new_pos[0] = 0
-            new_board[0] += 1
-        else:
-            new_pos[0] = ROWS - 1
-    if new_pos[1] < 0:
-        if current_board[1] > 0:
-            new_pos[1] = COLS - 1
-            new_board[1] -= 1
-        else:
-            new_pos[1] = 0
-    elif new_pos[1] >= COLS:
-        if current_board[1] < NUM_BOARDS - 1:
-            new_pos[1] = 0
-            new_board[1] += 1
-        else:
-            new_pos[1] = COLS - 1
-
-    # Check if the new position is in an active tile
-    if new_board != current_board:
-        if get_board(new_board[0] * NUM_BOARDS + new_board[1])[new_pos[0]][new_pos[1]].active:
-            current_board[:] = new_board
-            player_pos[:] = new_pos
-            update_message_box()  # Update the message box when player moves to a new board
-            print(f"Moved to new board: {new_board}, new position: {new_pos}")
-        else:
-            print("Cannot move to inactive tile.")
-    else:
-        if get_current_board()[new_pos[0]][new_pos[1]].active:
-            # Check if the tile has a JSON link
-            if get_current_board()[new_pos[0]][new_pos[1]].json_file:
-                response = messagebox.askyesno("Trigger JSON Link", "Do you want to trigger the linked JSON file?")
-                if response:
-                    # Save temporary position and direction
-                    temporary_player_pos = player_pos[:]
-                    temporary_player_direction = player_direction
-                    temporary_player_orientation = get_direction_name(player_direction)
-                    
-                    load_game_state_from_file(get_current_board()[new_pos[0]][new_pos[1]].json_file, link_triggered=True)
-                    bring_window_to_front()  # Ensure window is brought to the front after loading
-                    return  # Prevent movement to the tile after loading the new game state
-                else:
-                    return  # Prevent movement to the tile
-            else:
-                player_pos[:] = new_pos
-            update_message_box()  # Update the message box when player moves to a new tile
-            print(f"Moved to position: {new_pos}")
-        else:
-            print("Cannot move to inactive tile.")
-
-def rotate_player(key):
-    global player_direction, current_image_index
-    if key == pygame.K_LEFT:
-        player_direction = (player_direction - 1) % 8
-        current_image_index = (current_image_index - 1) % len(get_current_tile().image_filenames) if get_current_tile().image_filenames else 0
-    elif key == pygame.K_RIGHT:
-        player_direction = (player_direction + 1) % 8
-        current_image_index = (current_image_index + 1) % len(get_current_tile().image_filenames) if get_current_tile().image_filenames else 0
-
-def toggle_edit_mode():
-    global edit_mode
-    edit_mode = not edit_mode
-    edit_button.set_text(f"Edit Mode: {'ON' if edit_mode else 'OFF'}")
-
-def toggle_json_link_mode():
-    global json_link_mode, clear_json_link_mode
-    json_link_mode = not json_link_mode
-    clear_json_link_mode = False  # Ensure clear JSON link mode is turned off
-    json_link_button.set_text(f"Manage JSON Links: {'ON' if json_link_mode else 'OFF'}")
-
-def toggle_clear_json_link_mode():
-    global clear_json_link_mode, json_link_mode
-    clear_json_link_mode = not clear_json_link_mode
-    json_link_mode = False  # Ensure JSON link mode is turned off
-    clear_json_link_button.set_text(f"Clear JSON Links: {'ON' if clear_json_link_mode else 'OFF'}")
-
-def edit_text():
-    current_tile = get_current_tile()
-    new_text = simpledialog.askstring("Edit Description", "Enter new text:", initialvalue=current_tile.text_content)
-    if new_text is not None:
-        current_tile.text_content = new_text
-        update_message_box()  # Update the message box with the new text
-
-def remove_current_tile_folder():
-    current_tile = get_current_tile()
-    current_tile.clear_directory()
-    update_message_box()  # Update the message box after removing the folder
-    print(f"Removed folder association from the current tile.")
-
-# Function to clear JSON links from the current tile
-def clear_current_tile_json_link():
-    current_tile = get_current_tile()
-    current_tile.clear_json_file()
-    current_tile.color = WHITE  # Reset color to white to indicate no link
-    update_message_box()  # Update the message box after clearing the JSON link
-    print(f"Cleared JSON link from the current tile.")
-
-# Functions to save and load the game state
-def save_game_state():
-    global current_loaded_file
-
-    if current_loaded_file is None:
-        filename = simpledialog.askstring("Save Game", "Enter the save file name:")
-        if not filename:
-            messagebox.showwarning("Save Game", "Save file name cannot be empty.")
-            return
-        current_loaded_file = os.path.join(save_directory, f"{filename}.json")
-    
-    game_state = {
-        "player_position": player_pos,
-        "player_direction": player_direction,
-        "current_board": current_board,
-        "tiles": []
-    }
-
-    for board_row in boards:
-        for board in board_row:
-            for row in board:
-                for tile in row:
-                    tile_data = {
-                        "row": tile.row,
-                        "col": tile.col,
-                        "board_row": boards.index(board_row),
-                        "board_col": board_row.index(board),
-                        "active": tile.active,
-                        "directory": tile.directory,
-                        "image_filenames": tile.image_filenames,
-                        "json_file": tile.json_file,
-                        "text_content": tile.text_content,  # Include text content in the save
-                        "folder_link": tile.folder_link  # Include folder link in the save
-                    }
-                    game_state["tiles"].append(tile_data)
-
-    with open(current_loaded_file, "w") as file:
-        json.dump(game_state, file, indent=4)
-    print("Game state saved.")
-
-def load_game_state():
-    global current_loaded_file
-
-    files = [f for f in os.listdir(save_directory) if f.endswith(".json")]
-    if not files:
-        messagebox.showwarning("Load Game", "No saved games found.")
-        return
-
-    selected_file = filedialog.askopenfilename(
-        title="Select a saved game",
-        initialdir=save_directory,
-        filetypes=[("JSON files", "*.json")]
-    )
-
-    if not selected_file:
-        return
-
-    current_loaded_file = selected_file
-    load_game_state_from_file(selected_file)
-    bring_window_to_front()  # Ensure window is brought to the front after loading
-
-def fetch_game_state(filepath):
-    try:
-        with open(filepath, "r") as file:
-            game_state = json.load(file)
-        return game_state
-    except Exception as e:
-        print(f"Error fetching game state: {e}")
-        return None
-
-def find_link_tile(game_state, previous_game_file):
-    for tile_data in game_state["tiles"]:
-        if tile_data.get("json_file") == previous_game_file:
-            return tile_data
-    return None
-
-def calculate_adjacent_tile(tile, direction):
-    row, col = tile["row"], tile["col"]
-    if direction == "North":
-        return row - 1, col
-    elif direction == "North-East":
-        return row - 1, col + 1
-    elif direction == "East":
-        return row, col + 1
-    elif direction == "South-East":
-        return row + 1, col + 1
-    elif direction == "South":
-        return row + 1, col
-    elif direction == "South-West":
-        return row + 1, col - 1
-    elif direction == "West":
-        return row, col - 1
-    elif direction == "North-West":
-        return row - 1, col - 1
-    return None  # Ensure the function always returns a tuple
-
-def calculate_opposite_tile(tile, direction):
-    row, col = tile["row"], tile["col"]
-    if direction == "North":
-        return row - 1, col
-    elif direction == "North-East":
-        return row - 1, col + 1
-    elif direction == "East":
-        return row, col + 1
-    elif direction == "South-East":
-        return row + 1, col + 1
-    elif direction == "South":
-        return row + 1, col
-    elif direction == "South-West":
-        return row + 1, col - 1
-    elif direction == "West":
-        return row, col - 1
-    elif direction == "North-West":
-        return row - 1, col - 1
-    return None
-
-def get_opposite_direction(direction):
-    opposites = {
-        "North": "South",
-        "North-East": "South-West",
-        "East": "West",
-        "South-East": "North-West",
-        "South": "North",
-        "South-West": "North-East",
-        "West": "East",
-        "North-West": "South-East"
-    }
-    return opposites[direction]
-
-def get_direction_name(direction):
-    directions = ["North", "North-East", "East", "South-East", "South", "South-West", "West", "North-West"]
-    return directions[direction]
-
-def load_game_state_from_file(filepath, link_triggered=False):
-    global player_pos, player_direction, current_board, current_image_index, temporary_player_pos, temporary_player_direction, temporary_player_orientation, current_loaded_file
-
-    game_state = fetch_game_state(filepath)
-    if not game_state:
-        return
-
-    previous_game_file = current_loaded_file
-    current_loaded_file = filepath
-
-    if link_triggered:
-        link_tile = find_link_tile(game_state, previous_game_file)
-        if link_tile and temporary_player_orientation:
-            opp_direction = get_opposite_direction(temporary_player_orientation)
-            opp_row, opp_col = calculate_opposite_tile(link_tile, temporary_player_orientation)
-
-            if 0 <= opp_row < ROWS and 0 <= opp_col < COLS:
-                player_pos = [opp_row, opp_col]
-            else:
-                print("Opposite tile is out of bounds.")
-                return
-
-            player_direction = temporary_player_direction
-            current_board = [link_tile["board_row"], link_tile["board_col"]]
-    else:
-        player_pos = game_state["player_position"]
-        player_direction = game_state["player_direction"]
-        current_board = game_state["current_board"]
-
-    # Clear the current game state
-    for board_row in boards:
-        for board in board_row:
-            for row in board:
-                for tile in row:
-                    tile.active = True
-                    tile.clear_directory()
-
-    try:
-        for tile_data in game_state["tiles"]:
-            board_index = tile_data.get("board_row", 0) * NUM_BOARDS + tile_data.get("board_col", 0)
-            tile = boards[tile_data.get("board_row", 0)][tile_data.get("board_col", 0)][tile_data["row"]][tile_data["col"]]
-            tile.active = tile_data["active"]
-            tile.directory = tile_data["directory"]
-            tile.image_filenames = tile_data["image_filenames"]
-            tile.json_file = tile_data.get("json_file")
-            tile.text_content = tile_data.get("text_content", "")
-            tile.folder_link = tile_data.get("folder_link", None)
-
-        current_image_index = 0
-        update_message_box()  # Update the message box after loading the game state
-        print("Game state loaded.")
-    except FileNotFoundError:
-        print("No saved game state found.")
-    except Exception as e:
-        print(f"Error loading game state: {e}")
-        messagebox.showerror("Load Game", f"Error loading game state: {e}")
-
-def update_message_box():
-    current_tile = get_current_tile()
-    message_box.html_text = f"<font color='#000000'>{current_tile.text_content}</font>"  # Ensure text is black
-
-    # Add the folder link to the message box if it exists
-    if current_tile.folder_link:
-        message_box.html_text += f"<br><a href='{current_tile.folder_link}'><font color='#0000FF'>{os.path.basename(current_tile.folder_link)}</font></a>"
-
-    message_box.rebuild()  # Rebuild to apply changes
-
-# Setup pygame_gui manager
-manager = pygame_gui.UIManager((screen_width, screen_height))
-
-# Create SidebarContainer with offset to raise elements higher
-sidebar_container = SidebarContainer(
-    x=screen_width - SIDEBAR_WIDTH,
-    y=0,
-    width=SIDEBAR_WIDTH,
-    height=screen_height,
-    offset=125  # Raise the elements by 125 pixels
-)
-
-# Create GUI buttons in a logical order with official-sounding labels
-load_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Load Game",
-    manager=manager
-)
-sidebar_container.add_element(load_button)
-
-save_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Save Game",
-    manager=manager
-)
-sidebar_container.add_element(save_button)
-
-edit_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Edit Mode",
-    manager=manager
-)
-sidebar_container.add_element(edit_button)
-
-image_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Select Image Folder",
-    manager=manager
-)
-sidebar_container.add_element(image_button)
-
-delete_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Remove Image Folder",
-    manager=manager
-)
-sidebar_container.add_element(delete_button)
-
-add_folder_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Add Folder Link",
-    manager=manager
-)
-sidebar_container.add_element(add_folder_button)
-
-edit_text_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Edit Description",
-    manager=manager
-)
-sidebar_container.add_element(edit_text_button)
-
-json_link_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Manage JSON Links",
-    manager=manager
-)
-sidebar_container.add_element(json_link_button)
-
-clear_json_link_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 40)),
-    text="Clear JSON Links",
-    manager=manager
-)
-sidebar_container.add_element(clear_json_link_button)
-
-# Add a scrollable text area to display text content
-message_box_panel = pygame_gui.elements.UIPanel(
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 120)),  # Adjust the height and width as needed
-    manager=manager
-)
-message_box_panel.background_colour = pygame.Color("#FFFFFF")  # Set the background color to white
-
-message_box = pygame_gui.elements.UITextBox(
-    html_text="<font color='#D3D3D3'>no text discription in image image</font>",  # Set initial text color to black
-    relative_rect=pygame.Rect((0, 0), (SIDEBAR_WIDTH - 20, 120)),  # Adjust the height and width as needed
-    container=message_box_panel,
-    manager=manager,
-    object_id="#message_box"
-)
-message_box.background_colour = pygame.Color("#FFFFFF")  # Set the background color to white
-message_box.text_colour = pygame.Color("#000000")  # Set the text color to black
-message_box.rebuild()  # Ensure the text box is rebuilt with the new settings
-sidebar_container.add_element(message_box_panel)
-
-clock = pygame.time.Clock()
-
-# Dictionary to store original button texts
-original_button_texts = {}
-
-# Function to show confirmation on a button
-def show_button_confirmation(button, confirmation_text, duration=2000):
-    global original_button_texts, confirmation_end_time, confirmation_button
-    original_button_texts[button] = button.text
-    button.set_text(confirmation_text)
-    confirmation_end_time = pygame.time.get_ticks() + duration
-    confirmation_button = button
-    print("Button confirmation displayed:", confirmation_text)
-
-# Function to handle adding a folder and displaying a link in the text box
-def add_folder():
-    directory = open_file_explorer()
-    if directory:
-        current_tile = get_current_tile()
-        current_tile.set_folder_link(directory)
-        update_message_box()
-        bring_window_to_front()  # Ensure window is brought to the front after loading
-
-# Function to handle clicking on a link in the text box
-def handle_link_click(link):
-    if os.path.isdir(link):
-        subprocess.Popen(['python', 'image_viewer.py', link])
-
-# Main game loop
-running = True
-selected_tile = None
-confirmation_button = None  # To store the current confirmation button
-confirmation_end_time = 0  # To track when to revert the button text
-while running:
-    time_delta = clock.tick(60) / 1000.0  # Limits the frame rate to 60 FPS
-    screen.fill(MAIN_BG_COLOR)  # Fill the main area with the main background color
-
-    # Draw the sidebar background
-    sidebar_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH, 0, SIDEBAR_WIDTH, screen_height)
-    pygame.draw.rect(screen, SIDEBAR_BG_COLOR, sidebar_rect)
-
-    mouse_pos = pygame.mouse.get_pos()
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_e:  # Toggle edit mode with 'E' key
-                toggle_edit_mode()
-            elif event.key == pygame.K_j:  # Toggle JSON link mode with 'J' key
-                toggle_json_link_mode()
-            elif event.key == pygame.K_c:  # Toggle clear JSON link mode with 'C' key
-                toggle_clear_json_link_mode()
-            elif event.key == pygame.K_UP:
-                move_player(forward=True)
-            elif event.key == pygame.K_DOWN:
-                move_player(forward=False)
-            elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
-                rotate_player(event.key)
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            offset_x = screen_width - SIDEBAR_WIDTH + 10
-            offset_y = 60
-            board = get_current_board()
-            for row in board:
-                for tile in row:
-                    adjusted_rect = tile.rect.move(offset_x, offset_y)
-                    if adjusted_rect.collidepoint(event.pos):
-                        if edit_mode:
-                            tile.toggle_active()
-                        elif json_link_mode:
-                            selected_file = filedialog.askopenfilename(
-                                title="Select a JSON file",
-                                initialdir=save_directory,
-                                filetypes=[("JSON files", "*.json")]
-                            )
-                            if selected_file:
-                                tile.set_json_file(selected_file)
-                        elif clear_json_link_mode:
-                            tile.clear_json_file()
-                            tile.color = WHITE  # Reset color to white to indicate no link
-                            update_message_box()  # Update the message box
-                        break
-        elif event.type == pygame_gui.UI_BUTTON_PRESSED:
-            if event.ui_element == load_button:
-                load_game_state()
-            elif event.ui_element == save_button:
-                save_game_state()
-            elif event.ui_element == edit_button:
-                toggle_edit_mode()
-            elif event.ui_element == image_button:
-                directory = open_file_explorer()
-                if directory:
-                    current_tile = get_current_tile()
-                    current_tile.set_directory(directory)
-                    current_image_index = 0  # Reset image index when a new folder is assigned
-                    bring_window_to_front()  # Ensure window is brought to the front after loading
-            elif event.ui_element == delete_button:
-                remove_current_tile_folder()
-            elif event.ui_element == add_folder_button:
-                add_folder()
-            elif event.ui_element == json_link_button:
-                toggle_json_link_mode()
-            elif event.ui_element == clear_json_link_button:
-                toggle_clear_json_link_mode()
-            elif event.ui_element == edit_text_button:
-                edit_text()
-
-        manager.process_events(event)
-
-        # Check for clicks on links in the message box
-        if event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
-            link_target = event.link_target
-            handle_link_click(link_target)
-
-    # Revert the button text after the duration has passed
-    if confirmation_button and pygame.time.get_ticks() > confirmation_end_time:
-        confirmation_button.set_text(original_button_texts[confirmation_button])
-        confirmation_button = None
-        print("Button confirmation hidden")
-
-    manager.update(time_delta)
-
-    offset_x = screen_width - SIDEBAR_WIDTH + 10
-    offset_y = 60
-
-    draw_board(mouse_pos, offset_x, offset_y)
-    draw_player(offset_x, offset_y)
-    current_tile = get_current_tile()
-
-    # Draw the image display area
-    image_display_area = pygame.Rect(10, 10, screen_width - SIDEBAR_WIDTH - 20, screen_height - 20)
-    pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
-
-    # Display the selected image if the current tile has images
-    if current_tile.image_filenames:
-        current_image = current_tile.get_current_image(current_image_index)
-        if current_image is not None:
-            img_height, img_width = current_image.shape[:2]
-            
-            display_width, display_height = image_display_area.width, image_display_area.height
-
-            # Calculate scale factors and new dimensions
-            scale_factor = min(display_width / img_width, display_height / img_height)
-            new_width = int(img_width * scale_factor)
-            new_height = int(img_height * scale_factor)
-
-            scaled_image = cv2.resize(current_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-            scaled_image_pygame = cv2_to_pygame(scaled_image)
-            image_rect = scaled_image_pygame.get_rect(center=image_display_area.center)
-            
-            screen.blit(scaled_image_pygame, image_rect.topleft)
-
-    sidebar_container.reposition_elements()
-
-    manager.draw_ui(screen)
-
-    pygame.display.flip()
-
-pygame.quit()
-sys.exit()
+    def load_image(self, filepath):
+        try:
+            image = Image.open(filepath)
+            return image
+        except Exception as e:
+            print(f"Failed to load image {filepath}: {e}")
+            return None
+
+# Run the application
+if __name__ == "__main__":
+    app = ViewalkApp()
+    app.mainloop()
