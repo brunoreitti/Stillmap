@@ -3,7 +3,6 @@ from tkinter import filedialog, messagebox, simpledialog, Menu
 import os
 import json
 from PIL import Image, ImageTk
-import functools
 import subprocess
 import traceback  # Import traceback for exception handling
 
@@ -37,7 +36,7 @@ class Tile:
         self.json_file = None
         self.text_content = ""
         self.folder_link = None
-        self.link_areas = []  # List of dictionaries with 'coords' and 'link'
+        self.link_areas = {}  # Dictionary with image_index as key
 
     def draw(self, canvas, offset_x, offset_y, edit_mode,
              json_link_mode, clear_json_link_mode):
@@ -107,13 +106,20 @@ class Tile:
     def clear_json_file(self):
         self.json_file = None
 
-    def add_link_area(self, area):
-        self.link_areas.append(area)
-        print(f"Added link area to tile ({self.row}, {self.col}): {area}")
+    def add_link_area(self, image_index, area):
+        if image_index not in self.link_areas:
+            self.link_areas[image_index] = []
+        self.link_areas[image_index].append(area)
+        print(f"Added link area to tile ({self.row}, {self.col}), image {image_index}: {area}")
 
-    def clear_link_areas(self):
-        self.link_areas = []
-        print(f"Cleared link areas for tile ({self.row}, {self.col})")
+    def clear_link_areas(self, image_index=None):
+        if image_index is not None:
+            if image_index in self.link_areas:
+                del self.link_areas[image_index]
+                print(f"Cleared link areas for tile ({self.row}, {self.col}), image {image_index}")
+        else:
+            self.link_areas = {}
+            print(f"Cleared all link areas for tile ({self.row}, {self.col})")
 
     def get_current_image(self, index):
         if not self.directory or index >= len(self.image_filenames):
@@ -154,6 +160,7 @@ class ViewalkApp(tk.Tk):
         self.json_link_mode = False
         self.clear_json_link_mode = False
         self.link_area_mode = False  # New mode for adding link areas
+        self.show_link_areas = False  # New variable to control visibility
 
         # Game state directory
         self.save_directory = "saved_game_states"
@@ -247,6 +254,12 @@ class ViewalkApp(tk.Tk):
             command=self.clear_link_areas)
         self.clear_link_areas_button.pack(pady=5, padx=5, side=tk.LEFT)
 
+        # New button to toggle Show Link Areas
+        self.show_link_areas_button = tk.Button(
+            self.buttons_frame, text="Show Link Areas: OFF",
+            command=self.toggle_show_link_areas)
+        self.show_link_areas_button.pack(pady=5, padx=5, side=tk.LEFT)
+
     def create_boards(self):
         # Create the boards
         self.boards = [[[
@@ -329,12 +342,7 @@ class ViewalkApp(tk.Tk):
             print("Drawing current image")
             current_tile = self.get_current_tile()
             if current_tile.image_filenames:
-                if len(current_tile.image_filenames) == 8:
-                    # Map player's direction to image index
-                    image_index = self.player_direction
-                else:
-                    # If fewer images, default to the first image
-                    image_index = 0
+                image_index = self.get_current_image_index()
                 current_image = current_tile.get_current_image(
                     image_index)
                 if current_image:
@@ -363,6 +371,20 @@ class ViewalkApp(tk.Tk):
                     self.canvas.tag_bind(self.image_id, "<Motion>", self.on_image_mouse_move)
                     self.canvas.tag_bind(self.image_id, "<Button-1>", self.on_image_click)
                     self.canvas.tag_bind(self.image_id, "<Button-3>", self.on_image_right_click)
+
+                    # Draw link areas if show_link_areas is True
+                    if self.show_link_areas or self.link_area_mode:
+                        image_index = self.get_current_image_index()
+                        link_areas = current_tile.link_areas.get(image_index, [])
+                        for area in link_areas:
+                            rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
+                            x0 = self.image_area_coords[0] + rel_x0 * (self.image_area_coords[2] - self.image_area_coords[0])
+                            y0 = self.image_area_coords[1] + rel_y0 * (self.image_area_coords[3] - self.image_area_coords[1])
+                            x1 = self.image_area_coords[0] + rel_x1 * (self.image_area_coords[2] - self.image_area_coords[0])
+                            y1 = self.image_area_coords[1] + rel_y1 * (self.image_area_coords[3] - self.image_area_coords[1])
+                            self.canvas.create_rectangle(
+                                x0, y0, x1, y1, outline='red', width=2)
+
                 else:
                     print("No current image to display.")
             else:
@@ -382,7 +404,9 @@ class ViewalkApp(tk.Tk):
                 delattr(self, 'hover_rect')
             # Check if mouse is over any link area
             current_tile = self.get_current_tile()
-            for idx, area in enumerate(current_tile.link_areas):
+            image_index = self.get_current_image_index()
+            link_areas = current_tile.link_areas.get(image_index, [])
+            for idx, area in enumerate(link_areas):
                 rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
                 x0 = self.image_area_coords[0] + rel_x0 * (self.image_area_coords[2] - self.image_area_coords[0])
                 y0 = self.image_area_coords[1] + rel_y0 * (self.image_area_coords[3] - self.image_area_coords[1])
@@ -393,8 +417,10 @@ class ViewalkApp(tk.Tk):
                     self.hover_rect = self.canvas.create_rectangle(
                         x0, y0, x1, y1, outline=HOVER_COLOR, width=2)
                     self.current_hover_area = idx
+                    self.current_hover_image_index = image_index
                     return
             self.current_hover_area = None
+            self.current_hover_image_index = None
         except Exception as e:
             print(f"Exception in on_image_mouse_move: {e}")
             traceback.print_exc()
@@ -404,7 +430,9 @@ class ViewalkApp(tk.Tk):
             x = event.x
             y = event.y
             current_tile = self.get_current_tile()
-            for idx, area in enumerate(current_tile.link_areas):
+            image_index = self.get_current_image_index()
+            link_areas = current_tile.link_areas.get(image_index, [])
+            for idx, area in enumerate(link_areas):
                 rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
                 x0 = self.image_area_coords[0] + rel_x0 * (self.image_area_coords[2] - self.image_area_coords[0])
                 y0 = self.image_area_coords[1] + rel_y0 * (self.image_area_coords[3] - self.image_area_coords[1])
@@ -412,7 +440,7 @@ class ViewalkApp(tk.Tk):
                 y1 = self.image_area_coords[1] + rel_y1 * (self.image_area_coords[3] - self.image_area_coords[1])
                 if x0 <= x <= x1 and y0 <= y <= y1:
                     # Clicked on this link area
-                    self.open_link_area_by_index(idx)
+                    self.open_link_area_by_index(idx, image_index)
                     return
         except Exception as e:
             print(f"Exception in on_image_click: {e}")
@@ -423,7 +451,9 @@ class ViewalkApp(tk.Tk):
             x = event.x
             y = event.y
             current_tile = self.get_current_tile()
-            for idx, area in enumerate(current_tile.link_areas):
+            image_index = self.get_current_image_index()
+            link_areas = current_tile.link_areas.get(image_index, [])
+            for idx, area in enumerate(link_areas):
                 rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
                 x0 = self.image_area_coords[0] + rel_x0 * (self.image_area_coords[2] - self.image_area_coords[0])
                 y0 = self.image_area_coords[1] + rel_y0 * (self.image_area_coords[3] - self.image_area_coords[1])
@@ -431,7 +461,7 @@ class ViewalkApp(tk.Tk):
                 y1 = self.image_area_coords[1] + rel_y1 * (self.image_area_coords[3] - self.image_area_coords[1])
                 if x0 <= x <= x1 and y0 <= y <= y1:
                     # Right-clicked on this link area
-                    self.show_context_menu(idx, event)
+                    self.show_context_menu(idx, image_index, event)
                     return
         except Exception as e:
             print(f"Exception in on_image_right_click: {e}")
@@ -647,11 +677,13 @@ class ViewalkApp(tk.Tk):
 
                     # Store in current tile
                     current_tile = self.get_current_tile()
+                    image_index = self.get_current_image_index()
                     # Create a new link area without a link yet
-                    current_tile.add_link_area({
-                        'coords': (rel_x0, rel_y0, rel_x1, rel_y1),
+                    current_tile.add_link_area(image_index, {
+                        'coords': [rel_x0, rel_y0, rel_x1, rel_y1],  # Use list instead of tuple
                         'link': None})
-                    # No need to redraw link areas since they are handled differently now
+                    # Redraw the canvas to show the new link area
+                    self.draw_canvas()
                 else:
                     messagebox.showwarning(
                         "Add Link Area",
@@ -673,26 +705,26 @@ class ViewalkApp(tk.Tk):
             print(f"Exception in on_canvas_right_click: {e}")
             traceback.print_exc()
 
-    def show_context_menu(self, area_index, event):
+    def show_context_menu(self, area_index, image_index, event):
         try:
-            print(f"Showing context menu for area {area_index}")
+            print(f"Showing context menu for area {area_index} on image {image_index}")
             # Create a context menu
             context_menu = Menu(self, tearoff=0)
             context_menu.add_command(
                 label="Add link to this",
-                command=lambda idx=area_index: self.add_link_to_area(idx))
+                command=lambda idx=area_index, img_idx=image_index: self.add_link_to_area(idx, img_idx))
             context_menu.post(event.x_root, event.y_root)
         except Exception as e:
             print(f"Exception in show_context_menu: {e}")
             traceback.print_exc()
 
-    def add_link_to_area(self, area_index):
+    def add_link_to_area(self, area_index, image_index):
         try:
-            print(f"Adding link to area {area_index}")
+            print(f"Adding link to area {area_index} on image {image_index}")
             directory = filedialog.askdirectory()
             if directory:
                 current_tile = self.get_current_tile()
-                area = current_tile.link_areas[area_index]
+                area = current_tile.link_areas[image_index][area_index]
                 area['link'] = directory
                 print(f"Assigned link to area: {area}")
                 self.draw_canvas()  # Redraw to reflect the added link
@@ -779,11 +811,23 @@ class ViewalkApp(tk.Tk):
             print(f"Exception in toggle_link_area_mode: {e}")
             traceback.print_exc()
 
+    def toggle_show_link_areas(self):
+        try:
+            print("Toggling show link areas")
+            self.show_link_areas = not self.show_link_areas
+            self.show_link_areas_button.config(
+                text=f"Show Link Areas: {'ON' if self.show_link_areas else 'OFF'}")
+            self.draw_canvas()
+        except Exception as e:
+            print(f"Exception in toggle_show_link_areas: {e}")
+            traceback.print_exc()
+
     def clear_link_areas(self):
         try:
             print("Clearing link areas")
             current_tile = self.get_current_tile()
-            current_tile.clear_link_areas()
+            image_index = self.get_current_image_index()
+            current_tile.clear_link_areas(image_index)
             self.draw_canvas()  # Redraw to reflect the changes
         except Exception as e:
             print(f"Exception in clear_link_areas: {e}")
@@ -875,7 +919,7 @@ class ViewalkApp(tk.Tk):
                 self.player_direction = (self.player_direction - 1) % 8
             else:
                 self.player_direction = (self.player_direction + 1) % 8
-            self.current_image_index = self.player_direction  # Sync image index
+            self.current_image_index = self.get_current_image_index()  # Sync image index
             self.draw_canvas()
         except Exception as e:
             print(f"Exception in rotate_player: {e}")
@@ -888,7 +932,7 @@ class ViewalkApp(tk.Tk):
             if directory:
                 current_tile = self.get_current_tile()
                 current_tile.set_directory(directory)
-                self.current_image_index = self.player_direction
+                self.current_image_index = self.get_current_image_index()
                 self.draw_canvas()
         except Exception as e:
             print(f"Exception in select_image_folder: {e}")
@@ -942,10 +986,12 @@ class ViewalkApp(tk.Tk):
                 text_widget.tag_bind(
                     "link", "<Button-1>", lambda e: self.open_folder_link())
 
-            # Display link areas and their links
-            if current_tile.link_areas:
+            # Display link areas and their links for current image
+            image_index = self.get_current_image_index()
+            link_areas = current_tile.link_areas.get(image_index, [])
+            if link_areas:
                 text_widget.insert(tk.END, "\nLink Areas:\n")
-                for idx, area in enumerate(current_tile.link_areas):
+                for idx, area in enumerate(link_areas):
                     link = area.get('link')
                     if link:
                         tag_name = f"link_area_{idx}"
@@ -957,7 +1003,7 @@ class ViewalkApp(tk.Tk):
                         text_widget.tag_bind(
                             tag_name, "<Button-1>",
                             lambda e, idx=idx:
-                            self.open_link_area_by_index(idx))
+                            self.open_link_area_by_index(idx, image_index))
                     else:
                         text_widget.insert(
                             tk.END, f"Area {idx + 1}: No link assigned\n")
@@ -1002,11 +1048,11 @@ class ViewalkApp(tk.Tk):
             print(f"Exception in open_link_area: {e}")
             traceback.print_exc()
 
-    def open_link_area_by_index(self, idx, event=None):
+    def open_link_area_by_index(self, idx, image_index, event=None):
         try:
-            print(f"Opening link area by index {idx}")
+            print(f"Opening link area by index {idx} on image {image_index}")
             current_tile = self.get_current_tile()
-            area = current_tile.link_areas[idx]
+            area = current_tile.link_areas.get(image_index, [])[idx]
             self.open_link_area(area)
         except Exception as e:
             print(f"Exception in open_link_area_by_index: {e}")
@@ -1036,6 +1082,15 @@ class ViewalkApp(tk.Tk):
                 for board in board_row:
                     for row in board:
                         for tile in row:
+                            # Prepare link areas for JSON serialization
+                            link_areas_serializable = {}
+                            for img_index, areas in tile.link_areas.items():
+                                link_areas_serializable[str(img_index)] = []
+                                for area in areas:
+                                    # Ensure 'coords' are lists
+                                    area_copy = area.copy()
+                                    area_copy['coords'] = list(area_copy['coords'])
+                                    link_areas_serializable[str(img_index)].append(area_copy)
                             tile_data = {
                                 "row": tile.row,
                                 "col": tile.col,
@@ -1046,7 +1101,7 @@ class ViewalkApp(tk.Tk):
                                 "json_file": tile.json_file,
                                 "text_content": tile.text_content,
                                 "folder_link": tile.folder_link,
-                                "link_areas": tile.link_areas  # Save link areas
+                                "link_areas": link_areas_serializable  # Save link areas
                             }
                             game_state["tiles"].append(tile_data)
 
@@ -1093,14 +1148,10 @@ class ViewalkApp(tk.Tk):
             self.current_board = game_state["current_board"]
 
             # Validate player position and current board
-            self.player_pos[0] = max(
-                0, min(self.player_pos[0], ROWS - 1))
-            self.player_pos[1] = max(
-                0, min(self.player_pos[1], COLS - 1))
-            self.current_board[0] = max(
-                0, min(self.current_board[0], NUM_BOARDS - 1))
-            self.current_board[1] = max(
-                0, min(self.current_board[1], NUM_BOARDS - 1))
+            self.player_pos[0] = max(0, min(self.player_pos[0], ROWS - 1))
+            self.player_pos[1] = max(0, min(self.player_pos[1], COLS - 1))
+            self.current_board[0] = max(0, min(self.current_board[0], NUM_BOARDS - 1))
+            self.current_board[1] = max(0, min(self.current_board[1], NUM_BOARDS - 1))
 
             # Clear the current game state
             for board_row in self.boards:
@@ -1126,17 +1177,34 @@ class ViewalkApp(tk.Tk):
                 tile.json_file = tile_data.get("json_file")
                 tile.text_content = tile_data.get("text_content", "")
                 tile.folder_link = tile_data.get("folder_link", None)
-                tile.link_areas = tile_data.get("link_areas", [])
+                link_areas = tile_data.get("link_areas", {})
 
-            self.current_image_index = self.player_direction
+                # Check if link_areas is a list (old format)
+                if isinstance(link_areas, list):
+                    # Convert list to dict with image_index 0
+                    new_link_areas = {0: link_areas}
+                    tile.link_areas = new_link_areas
+                else:
+                    # Convert image_index keys back to integers
+                    new_link_areas = {}
+                    for img_index_str, areas in link_areas.items():
+                        img_index = int(img_index_str)
+                        new_areas = []
+                        for area in areas:
+                            # Ensure 'coords' are tuples (or lists)
+                            area['coords'] = list(area['coords'])
+                            new_areas.append(area)
+                        new_link_areas[img_index] = new_areas
+                    tile.link_areas = new_link_areas
+
+            self.current_image_index = self.get_current_image_index()
             print("Game state loaded.")
             self.draw_canvas()
 
         except Exception as e:
             print(f"Error loading game state: {e}")
             traceback.print_exc()
-            messagebox.showerror(
-                "Load Game", f"Error loading game state: {e}")
+            messagebox.showerror("Load Game", f"Error loading game state: {e}")
 
     def get_current_board(self):
         return self.boards[self.current_board[0]][self.current_board[1]]
@@ -1145,16 +1213,20 @@ class ViewalkApp(tk.Tk):
         return self.get_current_board()[self.player_pos[0]][
             self.player_pos[1]]
 
+    def get_current_image_index(self):
+        current_tile = self.get_current_tile()
+        if current_tile.image_filenames and len(current_tile.image_filenames) == 8:
+            return self.player_direction
+        else:
+            return 0
+
     def show_image_popup(self):
         try:
             print("Showing image popup")
             # Open a popup window to display the image
             current_tile = self.get_current_tile()
             if current_tile.image_filenames:
-                if len(current_tile.image_filenames) == 8:
-                    image_index = self.player_direction
-                else:
-                    image_index = 0
+                image_index = self.get_current_image_index()
                 current_image = current_tile.get_current_image(
                     image_index)
                 if current_image:
