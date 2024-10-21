@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, Menu
 import os
 import json
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 import subprocess
 import traceback  # Import traceback for exception handling
 
@@ -57,7 +57,8 @@ class Tile:
                 lambda e: canvas.itemconfig(self.rect, fill=BLACK))
             canvas.tag_bind(
                 self.rect, "<Leave>",
-                lambda e: canvas.itemconfig(self.rect, fill=fill_color))
+                lambda e: canvas.itemconfig(
+                    self.rect, fill=COLOR1 if self.active else BLACK))
             canvas.tag_bind(
                 self.rect, "<Button-1>",
                 lambda e: self.on_tile_click(edit_mode, json_link_mode, clear_json_link_mode))
@@ -124,8 +125,7 @@ class Tile:
     def get_current_image(self, index):
         if not self.directory or index >= len(self.image_filenames):
             return None
-        filepath = os.path.join(self.directory,
-                                self.image_filenames[index])
+        filepath = os.path.join(self.directory, self.image_filenames[index])
         print(f"Loading image at: {filepath}")  # Debug statement
         image = self.load_image(filepath)
         if image is not None:
@@ -135,6 +135,8 @@ class Tile:
     def load_image(self, filepath):
         try:
             image = Image.open(filepath)
+            # Correct the orientation according to EXIF data
+            image = ImageOps.exif_transpose(image)
             return image
         except Exception as e:
             print(f"Failed to load image {filepath}: {e}")
