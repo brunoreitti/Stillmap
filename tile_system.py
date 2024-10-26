@@ -5,6 +5,7 @@ import os
 import json
 import cv2
 from tkinter import filedialog, simpledialog, messagebox
+import subprocess
 
 # Constants
 ROWS, COLS = 9, 9  # Size of the board
@@ -31,6 +32,7 @@ current_board = [1, 1]  # Center board in 3x3 grid
 edit_mode = False
 json_link_mode = False
 clear_json_link_mode = False
+link_area_mode = False  # New mode for adding link areas
 
 # Image management
 current_image_index = 0
@@ -46,9 +48,13 @@ temporary_player_direction = None
 temporary_player_orientation = None
 
 # Functions to be assigned from main.py
-update_message_box = None
 bring_window_to_front = None
 load_image = None
+
+# History management
+history = []
+history_index = -1  # Start at -1 to indicate that no history is recorded yet
+max_history_length = 50  # Limit the history size to prevent excessive memory use
 
 # Tile class definition
 class Tile:
@@ -65,6 +71,7 @@ class Tile:
         self.json_file = None  # Associated JSON file
         self.text_content = ""  # Text content
         self.folder_link = None  # Folder link
+        self.link_areas = {}  # Dictionary with image_index as key
 
     # Methods for the Tile class
     def draw(self, surface, mouse_pos, offset_x, offset_y):
@@ -87,6 +94,7 @@ class Tile:
         if directory:
             self.image_filenames = [f for f in os.listdir(directory)
                                     if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
+            self.image_filenames.sort()  # Ensure consistent order
 
     def clear_directory(self):
         self.directory = None
@@ -120,6 +128,22 @@ class Tile:
                 return f"Error loading JSON: {e}"
         return "No JSON linked."
 
+    # Methods for link areas
+    def add_link_area(self, image_index, area):
+        if image_index not in self.link_areas:
+            self.link_areas[image_index] = []
+        self.link_areas[image_index].append(area)
+        print(f"Added link area to tile ({self.row}, {self.col}), image {image_index}: {area}")
+
+    def clear_link_areas(self, image_index=None):
+        if image_index is not None:
+            if image_index in self.link_areas:
+                del self.link_areas[image_index]
+                print(f"Cleared link areas for tile ({self.row}, {self.col}), image {image_index}")
+        else:
+            self.link_areas = {}
+            print(f"Cleared all link areas for tile ({self.row}, {self.col})")
+
 # Initialize the boards
 NUM_BOARDS = 3  # Number of 9x9 boards in each direction (3x3 grid)
 boards = None  # Will be initialized later
@@ -134,7 +158,8 @@ def initialize():
         ] for _ in range(NUM_BOARDS)
     ]
 
-# Functions related to the tile system
+# Rest of tile_system.py remains the same, with link area handling added
+
 def get_board(board_index):
     return boards[board_index // NUM_BOARDS][board_index % NUM_BOARDS]
 
@@ -237,32 +262,12 @@ def move_player(forward=True):
         if boards[new_board[0]][new_board[1]][new_pos[0]][new_pos[1]].active:
             current_board[:] = new_board
             player_pos[:] = new_pos
-            if update_message_box:
-                update_message_box()
             print(f"Moved to new board: {new_board}, new position: {new_pos}")
         else:
             print("Cannot move to inactive tile.")
     else:
         if get_current_board()[new_pos[0]][new_pos[1]].active:
-            # Check if the tile has a JSON link
-            if get_current_board()[new_pos[0]][new_pos[1]].json_file:
-                response = messagebox.askyesno("Trigger JSON Link", "Do you want to trigger the linked JSON file?")
-                if response:
-                    # Save temporary position and direction
-                    temporary_player_pos = player_pos[:]
-                    temporary_player_direction = player_direction
-                    temporary_player_orientation = get_direction_name(player_direction)
-                    
-                    load_game_state_from_file(get_current_board()[new_pos[0]][new_pos[1]].json_file, link_triggered=True)
-                    if bring_window_to_front:
-                        bring_window_to_front()  # Ensure window is brought to the front after loading
-                    return  # Prevent movement to the tile after loading the new game state
-                else:
-                    return  # Prevent movement to the tile
-            else:
-                player_pos[:] = new_pos
-            if update_message_box:
-                update_message_box()
+            player_pos[:] = new_pos
             print(f"Moved to position: {new_pos}")
         else:
             print("Cannot move to inactive tile.")
@@ -295,22 +300,16 @@ def edit_text():
     new_text = simpledialog.askstring("Edit Description", "Enter new text:", initialvalue=current_tile.text_content)
     if new_text is not None:
         current_tile.text_content = new_text
-        if update_message_box:
-            update_message_box()
 
 def remove_current_tile_folder():
     current_tile = get_current_tile()
     current_tile.clear_directory()
-    if update_message_box:
-        update_message_box()
     print(f"Removed folder association from the current tile.")
 
 def clear_current_tile_json_link():
     current_tile = get_current_tile()
     current_tile.clear_json_file()
     current_tile.color = WHITE  # Reset color to white to indicate no link
-    if update_message_box:
-        update_message_box()
     print(f"Cleared JSON link from the current tile.")
 
 # Functions to save and load the game state
@@ -324,30 +323,7 @@ def save_game_state():
             return
         current_loaded_file = os.path.join(save_directory, f"{filename}.json")
     
-    game_state = {
-        "player_position": player_pos,
-        "player_direction": player_direction,
-        "current_board": current_board,
-        "tiles": []
-    }
-
-    for board_row in boards:
-        for board in board_row:
-            for row in board:
-                for tile in row:
-                    tile_data = {
-                        "row": tile.row,
-                        "col": tile.col,
-                        "board_row": boards.index(board_row),
-                        "board_col": board_row.index(board),
-                        "active": tile.active,
-                        "directory": tile.directory,
-                        "image_filenames": tile.image_filenames,
-                        "json_file": tile.json_file,
-                        "text_content": tile.text_content,  # Include text content in the save
-                        "folder_link": tile.folder_link  # Include folder link in the save
-                    }
-                    game_state["tiles"].append(tile_data)
+    game_state = serialize_game_state()
 
     with open(current_loaded_file, "w") as file:
         json.dump(game_state, file, indent=4)
@@ -375,114 +351,138 @@ def load_game_state():
     if bring_window_to_front:
         bring_window_to_front()  # Ensure window is brought to the front after loading
 
-def fetch_game_state(filepath):
+def load_game_state_from_file(filepath):
+    global player_pos, player_direction, current_board, current_image_index
+
     try:
         with open(filepath, "r") as file:
             game_state = json.load(file)
-        return game_state
+
+        load_game_state_from_dict(game_state)
+        print("Game state loaded from file.")
     except Exception as e:
-        print(f"Error fetching game state: {e}")
-        return None
+        print(f"Error loading game state: {e}")
+        messagebox.showerror("Load Game", f"Error loading game state: {e}")
 
-def find_link_tile(game_state, previous_game_file):
-    for tile_data in game_state["tiles"]:
-        if tile_data.get("json_file") == previous_game_file:
-            return tile_data
-    return None
-
-def calculate_opposite_tile(tile, direction):
-    row, col = tile["row"], tile["col"]
-    if direction == "North":
-        return row + 1, col
-    elif direction == "North-East":
-        return row + 1, col - 1
-    elif direction == "East":
-        return row, col - 1
-    elif direction == "South-East":
-        return row - 1, col - 1
-    elif direction == "South":
-        return row - 1, col
-    elif direction == "South-West":
-        return row - 1, col + 1
-    elif direction == "West":
-        return row, col + 1
-    elif direction == "North-West":
-        return row + 1, col + 1
-    return None
-
-def get_opposite_direction(direction):
-    opposites = {
-        "North": "South",
-        "North-East": "South-West",
-        "East": "West",
-        "South-East": "North-West",
-        "South": "North",
-        "South-West": "North-East",
-        "West": "East",
-        "North-West": "South-East"
+def serialize_game_state():
+    # Return the current game state as a dictionary
+    game_state = {
+        "player_position": player_pos.copy(),
+        "player_direction": player_direction,
+        "current_board": current_board.copy(),
+        "tiles": []
     }
-    return opposites[direction]
-
-def get_direction_name(direction):
-    directions = ["North", "North-East", "East", "South-East", "South", "South-West", "West", "North-West"]
-    return directions[direction]
-
-def load_game_state_from_file(filepath, link_triggered=False):
-    global player_pos, player_direction, current_board, current_image_index, temporary_player_pos, temporary_player_direction, temporary_player_orientation, current_loaded_file
-
-    game_state = fetch_game_state(filepath)
-    if not game_state:
-        return
-
-    previous_game_file = current_loaded_file
-    current_loaded_file = filepath
-
-    if link_triggered:
-        link_tile = find_link_tile(game_state, previous_game_file)
-        if link_tile and temporary_player_orientation:
-            opp_direction = get_opposite_direction(temporary_player_orientation)
-            opp_row, opp_col = calculate_opposite_tile(link_tile, temporary_player_orientation)
-
-            if 0 <= opp_row < ROWS and 0 <= opp_col < COLS:
-                player_pos = [opp_row, opp_col]
-            else:
-                print("Opposite tile is out of bounds.")
-                return
-
-            player_direction = temporary_player_direction
-            current_board = [link_tile["board_row"], link_tile["board_col"]]
-    else:
-        player_pos = game_state["player_position"]
-        player_direction = game_state["player_direction"]
-        current_board = game_state["current_board"]
-
-    # Clear the current game state
     for board_row in boards:
         for board in board_row:
             for row in board:
                 for tile in row:
-                    tile.active = True
-                    tile.clear_directory()
+                    # Prepare link areas for JSON serialization
+                    link_areas_serializable = {}
+                    for img_index, areas in tile.link_areas.items():
+                        link_areas_serializable[str(img_index)] = []
+                        for area in areas:
+                            # Ensure 'coords' are lists
+                            area_copy = area.copy()
+                            area_copy['coords'] = list(area_copy['coords'])
+                            link_areas_serializable[str(img_index)].append(area_copy)
+                    tile_data = {
+                        "row": tile.row,
+                        "col": tile.col,
+                        "board_row": boards.index(board_row),
+                        "board_col": board_row.index(board),
+                        "active": tile.active,
+                        "directory": tile.directory,
+                        "image_filenames": tile.image_filenames,
+                        "json_file": tile.json_file,
+                        "text_content": tile.text_content,  # Include text content in the save
+                        "folder_link": tile.folder_link,  # Include folder link in the save
+                        "link_areas": link_areas_serializable  # Save link areas
+                    }
+                    game_state["tiles"].append(tile_data)
+    return game_state
+
+def load_game_state_from_dict(game_state):
+    global player_pos, player_direction, current_board, current_image_index
 
     try:
+        player_pos[:] = game_state["player_position"]
+        player_direction = game_state["player_direction"]
+        current_board[:] = game_state["current_board"]
+
+        # Clear the current game state
+        for board_row in boards:
+            for board in board_row:
+                for row in board:
+                    for tile in row:
+                        tile.active = True
+                        tile.clear_directory()
+                        tile.clear_json_file()
+                        tile.text_content = ""
+                        tile.folder_link = None
+                        tile.clear_link_areas()
+
         for tile_data in game_state["tiles"]:
-            tile = boards[tile_data.get("board_row", 0)][tile_data.get("board_col", 0)][tile_data["row"]][tile_data["col"]]
-            tile.active = tile_data["active"]
-            tile.directory = tile_data["directory"]
-            tile.image_filenames = tile_data["image_filenames"]
+            board_row = tile_data["board_row"]
+            board_col = tile_data["board_col"]
+            row = tile_data["row"]
+            col = tile_data["col"]
+            tile = boards[board_row][board_col][row][col]
+            tile.active = tile_data.get("active", True)
+            tile.set_directory(tile_data.get("directory"))
             tile.json_file = tile_data.get("json_file")
             tile.text_content = tile_data.get("text_content", "")
             tile.folder_link = tile_data.get("folder_link", None)
+            link_areas = tile_data.get("link_areas", {})
+            # Convert image_index keys back to integers
+            new_link_areas = {}
+            for img_index_str, areas in link_areas.items():
+                img_index = int(img_index_str)
+                new_areas = []
+                for area in areas:
+                    # Ensure 'coords' are lists
+                    area['coords'] = list(area['coords'])
+                    new_areas.append(area)
+                new_link_areas[img_index] = new_areas
+            tile.link_areas = new_link_areas
 
         current_image_index = 0
-        if update_message_box:
-            update_message_box()
-        print("Game state loaded.")
-    except FileNotFoundError:
-        print("No saved game state found.")
+        print("Game state loaded from dict.")
     except Exception as e:
         print(f"Error loading game state: {e}")
         messagebox.showerror("Load Game", f"Error loading game state: {e}")
+
+def save_current_state_to_history():
+    global history, history_index
+    # Serialize the current game state
+    game_state = serialize_game_state()
+    # If we are not at the end of history, discard future history
+    if history_index < len(history) - 1:
+        history = history[:history_index+1]
+    history.append(game_state)
+    # Keep history within limits
+    if len(history) > max_history_length:
+        history = history[-max_history_length:]
+    history_index = len(history) - 1
+
+def go_back():
+    global history_index
+    if history_index > 0:
+        history_index -= 1
+        game_state = history[history_index]
+        load_game_state_from_dict(game_state)
+        print("Went back in history.")
+    else:
+        print("No previous state in history.")
+
+def go_forward():
+    global history_index
+    if history_index < len(history) - 1:
+        history_index += 1
+        game_state = history[history_index]
+        load_game_state_from_dict(game_state)
+        print("Went forward in history.")
+    else:
+        print("No next state in history.")
 
 # Expose necessary variables and functions for import
 __all__ = [
@@ -494,5 +494,7 @@ __all__ = [
     'temporary_player_pos', 'temporary_player_direction', 'temporary_player_orientation',
     'save_directory', 'clear_current_tile_json_link', 'get_board',
     'save_game_state', 'load_game_state', 'load_game_state_from_file', 'initialize',
+    'link_area_mode', 'open_link_area', 'save_current_state_to_history',
+    'go_back', 'go_forward',
     # Include other necessary functions and variables
 ]
