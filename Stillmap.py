@@ -1,3 +1,5 @@
+# main.py
+
 import pygame
 import pygame_gui
 import ctypes
@@ -56,6 +58,17 @@ def open_file_explorer():
     directory = filedialog.askdirectory()
     return directory
 
+def open_image_file_explorer():
+    filetypes = (
+        ('Image files', '*.png;*.jpg;*.jpeg;*.bmp;*.gif'),
+        ('All files', '*.*')
+    )
+    filename = filedialog.askopenfilename(
+        title='Open an image',
+        initialdir=os.getcwd(),
+        filetypes=filetypes)
+    return filename
+
 def load_image_with_orientation(filepath):
     image = cv2.imread(filepath)
     if image is None:
@@ -109,12 +122,12 @@ def handle_link_click(link):
 # Assign functions in tile_system that need access to functions in main.py
 tile_system.bring_window_to_front = bring_window_to_front
 tile_system.load_image = load_image
+tile_system.cv2_to_pygame = cv2_to_pygame  # Assign cv2_to_pygame function
 
 # Set the SQUARE_SIZE and initialize the tile system
 SQUARE_SIZE = 36  # Set square size to 36 pixels
 tile_system.SQUARE_SIZE = SQUARE_SIZE  # Set in tile_system
-tile_system.BOARD_SIZE = SQUARE_SIZE * tile_system.COLS  # Set BOARD_SIZE in tile_system
-tile_system.initialize()  # Initialize the boards now that SQUARE_SIZE is set
+tile_system.initialize()  # Initialize the tiles now that SQUARE_SIZE is set
 
 # Function to load link areas for images in image viewing mode
 def load_image_viewing_link_areas():
@@ -186,9 +199,9 @@ for i, text in enumerate(button_texts):
  edit_text_button, json_link_button,
  clear_json_link_button, add_link_area_button, assign_link_folder_button, assign_json_area_button, show_links_button) = buttons
 
-# Adjust tile window size to match the tileboard size
-tile_window_width = SQUARE_SIZE * tile_system.COLS  # 36 * 9 = 324
-tile_window_height = SQUARE_SIZE * tile_system.ROWS  # 36 * 9 = 324
+# Adjust tile window size to match the original size
+tile_window_width = SQUARE_SIZE * 9  # Original width (e.g., 324 pixels)
+tile_window_height = SQUARE_SIZE * 9  # Original height (e.g., 324 pixels)
 
 # Create the tile window in the top right corner
 tile_window = pygame_gui.elements.UIWindow(
@@ -199,7 +212,7 @@ tile_window = pygame_gui.elements.UIWindow(
 )
 
 # Create a UIImage inside the tile window to display the tiles
-tile_image_surface = pygame.Surface((tile_window_width, tile_window_height))
+tile_image_surface = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
 tile_image = pygame_gui.elements.UIImage(
     relative_rect=pygame.Rect((0, 0), (tile_window_width, tile_window_height)),
     image_surface=tile_image_surface,
@@ -207,19 +220,57 @@ tile_image = pygame_gui.elements.UIImage(
     container=tile_window
 )
 
-clock = pygame.time.Clock()
+tile_window_visible = True  # Flag to track if the tile window is visible
+tile_window_maximized = False  # Flag to track if the tile window is maximized
 
-# Dictionary to store original button texts
-original_button_texts = {}
+# Introduce zoom_factor
+zoom_factor = 1.0  # Default zoom level
 
-# Function to show confirmation on a button
-def show_button_confirmation(button, confirmation_text, duration=2000):
-    global original_button_texts, confirmation_end_time, confirmation_button
-    original_button_texts[button] = button.text
-    button.set_text(confirmation_text)
-    confirmation_end_time = pygame.time.get_ticks() + duration
-    confirmation_button = button
-    print("Button confirmation displayed:", confirmation_text)
+# Define minimum and maximum zoom levels
+MIN_ZOOM = 0.5
+MAX_ZOOM = 3.0
+
+# Add Reset Zoom Button to the tile window's title bar
+reset_zoom_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((-240, 0), (80, 30)),  # Adjusted position
+    text="Reset Zoom",
+    manager=manager,
+    container=tile_window,
+    anchors={
+        'left': 'right',
+        'right': 'right',
+        'top': 'top',
+        'bottom': 'top'
+    }
+)
+
+# Add Maximize/Restore Button to the tile window's title bar
+maximize_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((-160, 0), (80, 30)),  # Adjusted position
+    text="Maximize",
+    manager=manager,
+    container=tile_window,
+    anchors={
+        'left': 'right',
+        'right': 'right',
+        'top': 'top',
+        'bottom': 'top'
+    }
+)
+
+# Add Set Background Button to the tile window's title bar
+set_bg_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((-80, 0), (80, 30)),  # Adjusted position
+    text="Set BG",
+    manager=manager,
+    container=tile_window,
+    anchors={
+        'left': 'right',
+        'right': 'right',
+        'top': 'top',
+        'bottom': 'top'
+    }
+)
 
 # Create the restore button in the top right corner
 restore_tile_window_button = pygame_gui.elements.UIButton(
@@ -228,8 +279,6 @@ restore_tile_window_button = pygame_gui.elements.UIButton(
     manager=manager,
     object_id="#restore_button"
 )
-
-tile_window_visible = True  # Flag to track if the tile window is visible
 
 # Variables for drawing link areas
 drawing_link_area = False
@@ -275,10 +324,27 @@ link_area_mode = False
 # Variables for managing link areas in image viewing mode
 image_viewing_link_areas = {}  # Key: image path, Value: list of link areas
 
+clock = pygame.time.Clock()
+
+# Dictionary to store original button texts
+original_button_texts = {}
+
+# Function to show confirmation on a button
+def show_button_confirmation(button, confirmation_text, duration=2000):
+    global original_button_texts, confirmation_end_time, confirmation_button
+    original_button_texts[button] = button.text
+    button.set_text(confirmation_text)
+    confirmation_end_time = pygame.time.get_ticks() + duration
+    confirmation_button = button
+    print("Button confirmation displayed:", confirmation_text)
+
 # Main game loop
 running = True
 confirmation_button = None  # To store the current confirmation button
 confirmation_end_time = 0  # To track when to revert the button text
+
+# Variables to store the original size and position of the tile window
+original_tile_window_rect = tile_window.get_relative_rect().copy()
 
 while running:
     time_delta = clock.tick(60) / 1000.0  # Limits the frame rate to 60 FPS
@@ -302,7 +368,15 @@ while running:
             restore_tile_window_button.set_relative_position((screen_width - 50, 10))
             # Update tile window position if it's visible
             if tile_window is not None:
-                tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
+                if tile_window_maximized:
+                    image_display_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
+                    tile_window.set_relative_position((image_display_area.left, image_display_area.top))
+                    tile_window.set_dimensions((image_display_area.width, image_display_area.height))
+                    tile_image.set_dimensions((image_display_area.width, image_display_area.height))
+                    tile_image_surface = pygame.Surface((image_display_area.width, image_display_area.height), pygame.SRCALPHA)
+                    tile_image.set_image(tile_image_surface)
+                else:
+                    tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
             # Update get back button position
             if get_back_button is not None:
                 get_back_button.set_relative_position((10, 70))  # Adjusted position
@@ -342,7 +416,11 @@ while running:
                     tile_system.save_current_state_to_history()
                     tile_system.rotate_player(event.key)
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 8:  # Backward mouse button
+            if event.button == 4:  # Mouse wheel up
+                zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
+            elif event.button == 5:  # Mouse wheel down
+                zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
+            elif event.button == 8:  # Backward mouse button
                 tile_system.go_back()
                 bring_window_to_front()
             elif event.button == 9:  # Forward mouse button
@@ -375,32 +453,32 @@ while running:
                     tile_image_rect = tile_image.get_abs_rect()
                     if tile_image_rect.collidepoint(event.pos):
                         local_pos = (event.pos[0] - tile_image_rect.left, event.pos[1] - tile_image_rect.top)
-                        offset_x = 0
-                        offset_y = 0
-                        board = tile_system.get_current_board()
-                        for row in board:
-                            for tile in row:
-                                adjusted_rect = tile.rect.move(offset_x, offset_y)
-                                if adjusted_rect.collidepoint(local_pos):
-                                    if tile_system.edit_mode:
-                                        tile.toggle_active()
-                                    elif tile_system.json_link_mode:
-                                        selected_file = filedialog.askopenfilename(
-                                            title="Select a JSON file",
-                                            initialdir=tile_system.save_directory,
-                                            filetypes=[("JSON files", "*.json")]
-                                        )
-                                        if selected_file:
-                                            tile.set_json_file(selected_file)
-                                    elif tile_system.clear_json_link_mode:
-                                        tile.clear_json_file()
-                                        tile.color = WHITE  # Reset color to white to indicate no link
-                                    break
-                # Handle link area drawing
-                if tile_system.link_area_mode and event.button == 1:
-                    if 'image_rect' in locals() and image_rect.collidepoint(event.pos):
-                        link_area_start_pos = event.pos
-                        drawing_link_area = True
+                        # Calculate which tile was clicked
+                        half_window_width = tile_image_rect.width // 2
+                        half_window_height = tile_image_rect.height // 2
+                        scaled_square_size = SQUARE_SIZE * zoom_factor
+                        col_offset = (local_pos[0] - half_window_width) / scaled_square_size
+                        row_offset = (local_pos[1] - half_window_height) / scaled_square_size
+                        tile_row = tile_system.player_pos[0] + int(row_offset)
+                        tile_col = tile_system.player_pos[1] + int(col_offset)
+                        tile = tile_system.get_tile(tile_row, tile_col)
+                        if tile_system.edit_mode:
+                            tile.toggle_active()
+                        elif tile_system.json_link_mode:
+                            selected_file = filedialog.askopenfilename(
+                                title="Select a JSON file",
+                                initialdir=tile_system.save_directory,
+                                filetypes=[("JSON files", "*.json")]
+                            )
+                            if selected_file:
+                                tile.set_json_file(selected_file)
+                        elif tile_system.clear_json_link_mode:
+                            tile.clear_json_file()
+                    # Handle link area drawing
+                    if tile_system.link_area_mode and event.button == 1:
+                        if 'image_rect' in locals() and image_rect.collidepoint(event.pos):
+                            link_area_start_pos = event.pos
+                            drawing_link_area = True
                 # Handle closing the description popup when clicking outside
                 if description_popup_window is not None:
                     popup_rect = description_popup_window.get_abs_rect()
@@ -550,6 +628,36 @@ while running:
             elif event.ui_element == show_links_button:
                 show_link_areas = not show_link_areas
                 show_links_button.set_text(f"Show Links: {'ON' if show_link_areas else 'OFF'}")
+            elif event.ui_element == reset_zoom_button:
+                zoom_factor = 1.0  # Reset zoom to default
+            elif event.ui_element == maximize_button:
+                tile_window_maximized = not tile_window_maximized
+                if tile_window_maximized:
+                    # Maximize the tile window to the image display area
+                    maximize_button.set_text("Restore")
+                    image_display_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
+                    tile_window.set_relative_position((image_display_area.left, image_display_area.top))
+                    tile_window.set_dimensions((image_display_area.width, image_display_area.height))
+                    tile_image.set_dimensions((image_display_area.width, image_display_area.height))
+                    tile_image_surface = pygame.Surface((image_display_area.width, image_display_area.height), pygame.SRCALPHA)
+                    tile_image.set_image(tile_image_surface)
+                else:
+                    # Restore the tile window to its original size and position
+                    maximize_button.set_text("Maximize")
+                    tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
+                    tile_window.set_dimensions((tile_window_width, tile_window_height))
+                    tile_image.set_dimensions((tile_window_width, tile_window_height))
+                    tile_image_surface = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
+                    tile_image.set_image(tile_image_surface)
+            elif event.ui_element == set_bg_button:
+                # Open file dialog to select background image
+                bg_image_path = open_image_file_explorer()
+                if bg_image_path:
+                    background_image_cv2 = load_image(bg_image_path)
+                    if background_image_cv2 is not None:
+                        background_image_surface = cv2_to_pygame(background_image_cv2)
+                        tile_system.set_background_image(background_image_surface, bg_image_path)  # Pass both arguments
+                bring_window_to_front()
             elif event.ui_element == restore_tile_window_button:
                 if tile_window is None:
                     # Recreate the tile window
@@ -560,12 +668,51 @@ while running:
                         object_id="#tile_window"
                     )
                     # Recreate the tile_image inside the tile window
-                    tile_image_surface = pygame.Surface((tile_window_width, tile_window_height))
+                    tile_image_surface = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
                     tile_image = pygame_gui.elements.UIImage(
                         relative_rect=pygame.Rect((0, 0), (tile_window_width, tile_window_height)),
                         image_surface=tile_image_surface,
                         manager=manager,
                         container=tile_window
+                    )
+                    # Add Reset Zoom Button to the tile window's title bar
+                    reset_zoom_button = pygame_gui.elements.UIButton(
+                        relative_rect=pygame.Rect((-240, 0), (80, 30)),
+                        text="Reset Zoom",
+                        manager=manager,
+                        container=tile_window,
+                        anchors={
+                            'left': 'right',
+                            'right': 'right',
+                            'top': 'top',
+                            'bottom': 'top'
+                        }
+                    )
+                    # Add Maximize/Restore Button to the tile window's title bar
+                    maximize_button = pygame_gui.elements.UIButton(
+                        relative_rect=pygame.Rect((-160, 0), (80, 30)),
+                        text="Maximize",
+                        manager=manager,
+                        container=tile_window,
+                        anchors={
+                            'left': 'right',
+                            'right': 'right',
+                            'top': 'top',
+                            'bottom': 'top'
+                        }
+                    )
+                    # Add Set Background Button to the tile window's title bar
+                    set_bg_button = pygame_gui.elements.UIButton(
+                        relative_rect=pygame.Rect((-80, 0), (80, 30)),
+                        text="Set BG",
+                        manager=manager,
+                        container=tile_window,
+                        anchors={
+                            'left': 'right',
+                            'right': 'right',
+                            'top': 'top',
+                            'bottom': 'top'
+                        }
                     )
                     tile_window_visible = True
             elif event.ui_element == get_back_button:
@@ -585,6 +732,7 @@ while running:
             if event.ui_element == tile_window:
                 tile_window = None
                 tile_window_visible = False
+                tile_window_maximized = False
             elif event.ui_element == description_popup_window:
                 description_popup_window = None
                 description_text_box = None
@@ -702,6 +850,7 @@ while running:
                         if description_popup_window is None:
                             window_width = 200  # Adjust as needed
                             window_height = window_width * 3  # 3:1 ratio
+                            x, y = event.pos
                             # Ensure the window doesn't go off-screen
                             if x + window_width > screen_width:
                                 x = screen_width - window_width
@@ -819,12 +968,18 @@ while running:
 
     # Update the tile image if the tile window is visible and not in image viewing mode
     if tile_window is not None and not image_viewing_mode:
-        tile_image.image.fill((0, 0, 0))  # Clear the surface
+        tile_image.image.fill((0, 0, 0, 0))  # Clear the surface with transparency
         local_mouse_pos = pygame.mouse.get_pos()
         tile_image_rect = tile_image.get_abs_rect()
         local_mouse_pos = (local_mouse_pos[0] - tile_image_rect.left, local_mouse_pos[1] - tile_image_rect.top)
-        tile_system.draw_board(local_mouse_pos, 0, 0, tile_image.image)
-        tile_system.draw_player(0, 0, tile_image.image)
+        # Calculate visible area
+        visible_area = pygame.Rect(0, 0, tile_image_rect.width, tile_image_rect.height)
+        # Draw the board centered on the player
+        scaled_square_size = SQUARE_SIZE * zoom_factor
+        offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
+        offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
+        tile_system.draw_board(local_mouse_pos, offset_x, offset_y, tile_image.image, visible_area, zoom_factor)
+        tile_system.draw_player(offset_x, offset_y, tile_image.image, zoom_factor)
         tile_image_surface.blit(tile_image.image, (0, 0))  # Update the UIImage's surface
 
     manager.draw_ui(screen)
