@@ -3,16 +3,10 @@
 import pygame
 import os
 import json
-import cv2
 from tkinter import filedialog, simpledialog, messagebox
-import subprocess
 
 # Constants
-ROWS, COLS = 9, 9  # Size of the board
-
-# These will be set from main.py
-BOARD_SIZE = None
-SQUARE_SIZE = None
+SQUARE_SIZE = None  # Will be set from main.py
 
 # Colors
 COLOR1 = (40, 42, 54)
@@ -22,11 +16,8 @@ BLACK = (0, 0, 0)
 BLUE = (0, 0, 255)
 
 # Player's starting position and direction
-player_pos = [ROWS // 2, COLS // 2]
+player_pos = [0, 0]  # Starting at (0, 0)
 player_direction = 0
-
-# Current board indices
-current_board = [1, 1]  # Center board in 3x3 grid
 
 # Modes and toggles
 edit_mode = False
@@ -42,19 +33,22 @@ save_directory = "saved_game_states"
 os.makedirs(save_directory, exist_ok=True)
 current_loaded_file = None
 
-# Temporary variables for JSON linking
-temporary_player_pos = None
-temporary_player_direction = None
-temporary_player_orientation = None
-
 # Functions to be assigned from main.py
 bring_window_to_front = None
 load_image = None
+cv2_to_pygame = None
 
 # History management
 history = []
 history_index = -1  # Start at -1 to indicate that no history is recorded yet
 max_history_length = 50  # Limit the history size to prevent excessive memory use
+
+# Tiles storage
+tiles = {}  # Key: (row, col), Value: Tile object
+
+# Background image for the map
+background_image = None  # Pygame Surface for the background image
+background_image_path = None  # Path to the background image file
 
 # Tile class definition
 class Tile:
@@ -74,17 +68,22 @@ class Tile:
         self.link_areas = {}  # Dictionary with image_index as key
 
     # Methods for the Tile class
-    def draw(self, surface, mouse_pos, offset_x, offset_y):
-        adjusted_rect = self.rect.move(offset_x, offset_y)
+    def draw(self, surface, mouse_pos, offset_x, offset_y, zoom_factor):
+        scaled_size = self.size * zoom_factor
+        tile_pos_x = self.col * scaled_size + offset_x
+        tile_pos_y = self.row * scaled_size + offset_y
+        adjusted_rect = pygame.Rect(tile_pos_x, tile_pos_y, scaled_size, scaled_size)
+
+        # Draw only the grid lines to make tiles transparent
         if adjusted_rect.collidepoint(mouse_pos) and (edit_mode or json_link_mode or clear_json_link_mode):
-            color = BLACK
+            line_color = BLACK
         else:
             if self.json_file:
-                color = BLUE
+                line_color = BLUE
             else:
-                color = COLOR1 if self.active else BLACK
-        pygame.draw.rect(surface, color, adjusted_rect)
-        pygame.draw.rect(surface, COLOR2, adjusted_rect, 1)
+                line_color = COLOR2 if self.active else BLACK
+
+        pygame.draw.rect(surface, line_color, adjusted_rect, 1)  # Draw grid lines only
 
     def toggle_active(self):
         self.active = not self.active
@@ -144,65 +143,115 @@ class Tile:
             self.link_areas = {}
             print(f"Cleared all link areas for tile ({self.row}, {self.col})")
 
-# Initialize the boards
-NUM_BOARDS = 3  # Number of 9x9 boards in each direction (3x3 grid)
-boards = None  # Will be initialized later
-
+# Initialize the tile system
 def initialize():
-    global boards
-    boards = [
-        [
-            [
-                [Tile(row, col) for col in range(COLS)] for row in range(ROWS)
-            ] for _ in range(NUM_BOARDS)
-        ] for _ in range(NUM_BOARDS)
-    ]
+    global tiles
+    tiles = {}  # Clear existing tiles if any
 
-# Rest of tile_system.py remains the same, with link area handling added
-
-def get_board(board_index):
-    return boards[board_index // NUM_BOARDS][board_index % NUM_BOARDS]
-
-def get_current_board():
-    return boards[current_board[0]][current_board[1]]
+def get_tile(row, col):
+    key = (row, col)
+    if key not in tiles:
+        tiles[key] = Tile(row, col)
+    return tiles[key]
 
 def get_current_tile():
-    return get_current_board()[player_pos[0]][player_pos[1]]
+    return get_tile(player_pos[0], player_pos[1])
 
-def draw_board(mouse_pos, offset_x, offset_y, surface):
-    board = get_current_board()
-    for row in board:
-        for tile in row:
-            tile.draw(surface, mouse_pos, offset_x, offset_y)
+def draw_board(mouse_pos, offset_x, offset_y, surface, visible_area, zoom_factor):
+    # Draw the background image if it exists
+    if background_image is not None:
+        # Calculate the scale factor for the background image
+        bg_width = background_image.get_width()
+        bg_height = background_image.get_height()
+        scaled_bg_width = bg_width * zoom_factor
+        scaled_bg_height = bg_height * zoom_factor
 
-def draw_player(offset_x, offset_y, surface):
-    player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE).move(offset_x, offset_y)
-    pygame.draw.rect(surface, COLOR2, player_rect)
-    
+        # Scale the background image
+        bg_image_scaled = pygame.transform.scale(background_image, (int(scaled_bg_width), int(scaled_bg_height)))
+
+        # Since the background image represents the entire map, align it at (0, 0)
+        bg_pos_x = 0
+        bg_pos_y = 0
+
+        # Draw the background image
+        surface.blit(bg_image_scaled, (bg_pos_x + offset_x, bg_pos_y + offset_y))
+
+    # Draw the tiles (with transparency)
+    for key, tile in tiles.items():
+        scaled_size = tile.size * zoom_factor
+        tile_pos_x = tile.col * scaled_size + offset_x
+        tile_pos_y = tile.row * scaled_size + offset_y
+        tile_rect = pygame.Rect(tile_pos_x, tile_pos_y, scaled_size, scaled_size)
+        if tile_rect.colliderect(visible_area):
+            tile.draw(surface, mouse_pos, offset_x, offset_y, zoom_factor)
+
+def draw_player(offset_x, offset_y, surface, zoom_factor):
+    scaled_size = SQUARE_SIZE * zoom_factor
+    player_rect = pygame.Rect(
+        player_pos[1] * scaled_size + offset_x,
+        player_pos[0] * scaled_size + offset_y,
+        scaled_size,
+        scaled_size
+    )
+    # No need to draw a transparent rectangle here
+
     # Draw direction arrow
     center_x = player_rect.centerx
     center_y = player_rect.centery
-    arrow_length = SQUARE_SIZE // 2
+    arrow_length = scaled_size // 2
+    arrow_width = max(1, int(10 * zoom_factor))
 
     if player_direction == 0:  # Up
-        pygame.draw.polygon(surface, WHITE, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+        pygame.draw.polygon(surface, WHITE, [
+            (center_x, center_y - arrow_length),
+            (center_x - arrow_width, center_y),
+            (center_x + arrow_width, center_y)
+        ])
     elif player_direction == 1:  # Up-right
-        pygame.draw.polygon(surface, WHITE, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
+        pygame.draw.polygon(surface, WHITE, [
+            (center_x + arrow_length, center_y - arrow_length),
+            (center_x + arrow_width, center_y),
+            (center_x, center_y - arrow_width)
+        ])
     elif player_direction == 2:  # Right
-        pygame.draw.polygon(surface, WHITE, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+        pygame.draw.polygon(surface, WHITE, [
+            (center_x + arrow_length, center_y),
+            (center_x, center_y - arrow_width),
+            (center_x, center_y + arrow_width)
+        ])
     elif player_direction == 3:  # Down-right
-        pygame.draw.polygon(surface, WHITE, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
+        pygame.draw.polygon(surface, WHITE, [
+            (center_x + arrow_length, center_y + arrow_length),
+            (center_x + arrow_width, center_y),
+            (center_x, center_y + arrow_width)
+        ])
     elif player_direction == 4:  # Down
-        pygame.draw.polygon(surface, WHITE, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+        pygame.draw.polygon(surface, WHITE, [
+            (center_x, center_y + arrow_length),
+            (center_x - arrow_width, center_y),
+            (center_x + arrow_width, center_y)
+        ])
     elif player_direction == 5:  # Down-left
-        pygame.draw.polygon(surface, WHITE, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
+        pygame.draw.polygon(surface, WHITE, [
+            (center_x - arrow_length, center_y + arrow_length),
+            (center_x - arrow_width, center_y),
+            (center_x, center_y + arrow_width)
+        ])
     elif player_direction == 6:  # Left
-        pygame.draw.polygon(surface, WHITE, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+        pygame.draw.polygon(surface, WHITE, [
+            (center_x - arrow_length, center_y),
+            (center_x, center_y - arrow_width),
+            (center_x, center_y + arrow_width)
+        ])
     elif player_direction == 7:  # Up-left
-        pygame.draw.polygon(surface, WHITE, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
+        pygame.draw.polygon(surface, WHITE, [
+            (center_x - arrow_length, center_y - arrow_length),
+            (center_x - arrow_width, center_y),
+            (center_x, center_y - arrow_width)
+        ])
 
 def move_player(forward=True):
-    global current_board, temporary_player_pos, temporary_player_direction, temporary_player_orientation, current_loaded_file
+    global player_pos, current_image_index
 
     new_pos = player_pos[:]
     direction = player_direction if forward else (player_direction + 4) % 8  # Adjust direction for backward movement
@@ -228,58 +277,30 @@ def move_player(forward=True):
         new_pos[0] -= 1
         new_pos[1] -= 1
 
-    new_board = current_board[:]
-    print(f"Attempting to move to position: {new_pos} on board: {new_board}")
-
-    # Check for board transitions
-    if new_pos[0] < 0:
-        if current_board[0] > 0:
-            new_pos[0] = ROWS - 1
-            new_board[0] -= 1
-        else:
-            new_pos[0] = 0
-    elif new_pos[0] >= ROWS:
-        if current_board[0] < NUM_BOARDS - 1:
-            new_pos[0] = 0
-            new_board[0] += 1
-        else:
-            new_pos[0] = ROWS - 1
-    if new_pos[1] < 0:
-        if current_board[1] > 0:
-            new_pos[1] = COLS - 1
-            new_board[1] -= 1
-        else:
-            new_pos[1] = 0
-    elif new_pos[1] >= COLS:
-        if current_board[1] < NUM_BOARDS - 1:
-            new_pos[1] = 0
-            new_board[1] += 1
-        else:
-            new_pos[1] = COLS - 1
-
-    # Check if the new position is in an active tile
-    if new_board != current_board:
-        if boards[new_board[0]][new_board[1]][new_pos[0]][new_pos[1]].active:
-            current_board[:] = new_board
-            player_pos[:] = new_pos
-            print(f"Moved to new board: {new_board}, new position: {new_pos}")
-        else:
-            print("Cannot move to inactive tile.")
+    new_tile = get_tile(new_pos[0], new_pos[1])
+    if new_tile.active:
+        player_pos[:] = new_pos
+        current_image_index = 0  # Reset image index when moving to a new tile
+        print(f"Moved to position: {new_pos}")
     else:
-        if get_current_board()[new_pos[0]][new_pos[1]].active:
-            player_pos[:] = new_pos
-            print(f"Moved to position: {new_pos}")
-        else:
-            print("Cannot move to inactive tile.")
+        print("Cannot move to inactive tile.")
 
 def rotate_player(key):
     global player_direction, current_image_index
     if key == pygame.K_LEFT:
         player_direction = (player_direction - 1) % 8
-        current_image_index = (current_image_index - 1) % len(get_current_tile().image_filenames) if get_current_tile().image_filenames else 0
+        current_tile = get_current_tile()
+        if current_tile.image_filenames:
+            current_image_index = (current_image_index - 1) % len(current_tile.image_filenames)
+        else:
+            current_image_index = 0
     elif key == pygame.K_RIGHT:
         player_direction = (player_direction + 1) % 8
-        current_image_index = (current_image_index + 1) % len(get_current_tile().image_filenames) if get_current_tile().image_filenames else 0
+        current_tile = get_current_tile()
+        if current_tile.image_filenames:
+            current_image_index = (current_image_index + 1) % len(current_tile.image_filenames)
+        else:
+            current_image_index = 0
 
 def toggle_edit_mode():
     global edit_mode
@@ -312,6 +333,12 @@ def clear_current_tile_json_link():
     current_tile.color = WHITE  # Reset color to white to indicate no link
     print(f"Cleared JSON link from the current tile.")
 
+# Function to set the background image
+def set_background_image(image_surface, image_path):
+    global background_image, background_image_path
+    background_image = image_surface
+    background_image_path = image_path
+
 # Functions to save and load the game state
 def save_game_state():
     global current_loaded_file
@@ -322,7 +349,7 @@ def save_game_state():
             messagebox.showwarning("Save Game", "Save file name cannot be empty.")
             return
         current_loaded_file = os.path.join(save_directory, f"{filename}.json")
-    
+
     game_state = serialize_game_state()
 
     with open(current_loaded_file, "w") as file:
@@ -352,7 +379,7 @@ def load_game_state():
         bring_window_to_front()  # Ensure window is brought to the front after loading
 
 def load_game_state_from_file(filepath):
-    global player_pos, player_direction, current_board, current_image_index
+    global player_pos, player_direction, current_image_index
 
     try:
         with open(filepath, "r") as file:
@@ -369,64 +396,47 @@ def serialize_game_state():
     game_state = {
         "player_position": player_pos.copy(),
         "player_direction": player_direction,
-        "current_board": current_board.copy(),
-        "tiles": []
+        "tiles": [],
+        "background_image_path": background_image_path  # Save the background image path
     }
-    for board_row in boards:
-        for board in board_row:
-            for row in board:
-                for tile in row:
-                    # Prepare link areas for JSON serialization
-                    link_areas_serializable = {}
-                    for img_index, areas in tile.link_areas.items():
-                        link_areas_serializable[str(img_index)] = []
-                        for area in areas:
-                            # Ensure 'coords' are lists
-                            area_copy = area.copy()
-                            area_copy['coords'] = list(area_copy['coords'])
-                            link_areas_serializable[str(img_index)].append(area_copy)
-                    tile_data = {
-                        "row": tile.row,
-                        "col": tile.col,
-                        "board_row": boards.index(board_row),
-                        "board_col": board_row.index(board),
-                        "active": tile.active,
-                        "directory": tile.directory,
-                        "image_filenames": tile.image_filenames,
-                        "json_file": tile.json_file,
-                        "text_content": tile.text_content,  # Include text content in the save
-                        "folder_link": tile.folder_link,  # Include folder link in the save
-                        "link_areas": link_areas_serializable  # Save link areas
-                    }
-                    game_state["tiles"].append(tile_data)
+    for key, tile in tiles.items():
+        # Prepare link areas for JSON serialization
+        link_areas_serializable = {}
+        for img_index, areas in tile.link_areas.items():
+            link_areas_serializable[str(img_index)] = []
+            for area in areas:
+                # Ensure 'coords' are lists
+                area_copy = area.copy()
+                area_copy['coords'] = list(area_copy['coords'])
+                link_areas_serializable[str(img_index)].append(area_copy)
+        tile_data = {
+            "row": tile.row,
+            "col": tile.col,
+            "active": tile.active,
+            "directory": tile.directory,
+            "image_filenames": tile.image_filenames,
+            "json_file": tile.json_file,
+            "text_content": tile.text_content,  # Include text content in the save
+            "folder_link": tile.folder_link,  # Include folder link in the save
+            "link_areas": link_areas_serializable  # Save link areas
+        }
+        game_state["tiles"].append(tile_data)
     return game_state
 
 def load_game_state_from_dict(game_state):
-    global player_pos, player_direction, current_board, current_image_index
+    global player_pos, player_direction, tiles, current_image_index, background_image, background_image_path
 
     try:
         player_pos[:] = game_state["player_position"]
         player_direction = game_state["player_direction"]
-        current_board[:] = game_state["current_board"]
 
         # Clear the current game state
-        for board_row in boards:
-            for board in board_row:
-                for row in board:
-                    for tile in row:
-                        tile.active = True
-                        tile.clear_directory()
-                        tile.clear_json_file()
-                        tile.text_content = ""
-                        tile.folder_link = None
-                        tile.clear_link_areas()
+        tiles.clear()
 
         for tile_data in game_state["tiles"]:
-            board_row = tile_data["board_row"]
-            board_col = tile_data["board_col"]
             row = tile_data["row"]
             col = tile_data["col"]
-            tile = boards[board_row][board_col][row][col]
+            tile = Tile(row, col)
             tile.active = tile_data.get("active", True)
             tile.set_directory(tile_data.get("directory"))
             tile.json_file = tile_data.get("json_file")
@@ -444,6 +454,18 @@ def load_game_state_from_dict(game_state):
                     new_areas.append(area)
                 new_link_areas[img_index] = new_areas
             tile.link_areas = new_link_areas
+            tiles[(row, col)] = tile
+
+        # Load background image if path is saved
+        background_image_path = game_state.get("background_image_path")
+        if background_image_path and os.path.exists(background_image_path):
+            bg_image_cv2 = load_image(background_image_path)
+            if bg_image_cv2 is not None and cv2_to_pygame is not None:
+                background_image = cv2_to_pygame(bg_image_cv2)
+            else:
+                background_image = None
+        else:
+            background_image = None
 
         current_image_index = 0
         print("Game state loaded from dict.")
@@ -486,15 +508,14 @@ def go_forward():
 
 # Expose necessary variables and functions for import
 __all__ = [
-    'Tile', 'boards', 'get_current_board', 'get_current_tile', 'draw_board', 'draw_player',
+    'Tile', 'initialize', 'get_tile', 'get_current_tile', 'draw_board', 'draw_player',
     'move_player', 'rotate_player', 'toggle_edit_mode', 'toggle_json_link_mode',
     'toggle_clear_json_link_mode', 'edit_text', 'remove_current_tile_folder',
-    'player_pos', 'player_direction', 'current_board', 'edit_mode', 'json_link_mode',
+    'player_pos', 'player_direction', 'edit_mode', 'json_link_mode',
     'clear_json_link_mode', 'current_image_index', 'current_loaded_file',
-    'temporary_player_pos', 'temporary_player_direction', 'temporary_player_orientation',
-    'save_directory', 'clear_current_tile_json_link', 'get_board',
-    'save_game_state', 'load_game_state', 'load_game_state_from_file', 'initialize',
-    'link_area_mode', 'open_link_area', 'save_current_state_to_history',
-    'go_back', 'go_forward',
-    # Include other necessary functions and variables
+    'save_directory', 'clear_current_tile_json_link',
+    'save_game_state', 'load_game_state', 'load_game_state_from_file', 'link_area_mode',
+    'save_current_state_to_history', 'go_back', 'go_forward',
+    'bring_window_to_front', 'load_image', 'SQUARE_SIZE', 'set_background_image',
+    'cv2_to_pygame'
 ]
