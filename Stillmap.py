@@ -272,6 +272,20 @@ set_bg_button = pygame_gui.elements.UIButton(
     }
 )
 
+# Add Grid Toggle Button to the tile window's title bar
+grid_toggle_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((-320, 0), (80, 30)),  # Adjusted position
+    text="Grid: ON",
+    manager=manager,
+    container=tile_window,
+    anchors={
+        'left': 'right',
+        'right': 'right',
+        'top': 'top',
+        'bottom': 'top'
+    }
+)
+
 # Create the restore button in the top right corner
 restore_tile_window_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((screen_width - 50, 10), (40, 40)),
@@ -454,13 +468,11 @@ while running:
                     if tile_image_rect.collidepoint(event.pos):
                         local_pos = (event.pos[0] - tile_image_rect.left, event.pos[1] - tile_image_rect.top)
                         # Calculate which tile was clicked
-                        half_window_width = tile_image_rect.width // 2
-                        half_window_height = tile_image_rect.height // 2
                         scaled_square_size = SQUARE_SIZE * zoom_factor
-                        col_offset = (local_pos[0] - half_window_width) / scaled_square_size
-                        row_offset = (local_pos[1] - half_window_height) / scaled_square_size
-                        tile_row = tile_system.player_pos[0] + int(row_offset)
-                        tile_col = tile_system.player_pos[1] + int(col_offset)
+                        offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
+                        offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
+                        tile_col = int((local_pos[0] - offset_x) // scaled_square_size)
+                        tile_row = int((local_pos[1] - offset_y) // scaled_square_size)
                         tile = tile_system.get_tile(tile_row, tile_col)
                         if tile_system.edit_mode:
                             tile.toggle_active()
@@ -474,18 +486,19 @@ while running:
                                 tile.set_json_file(selected_file)
                         elif tile_system.clear_json_link_mode:
                             tile.clear_json_file()
-                    # Handle link area drawing
-                    if tile_system.link_area_mode and event.button == 1:
-                        if 'image_rect' in locals() and image_rect.collidepoint(event.pos):
-                            link_area_start_pos = event.pos
-                            drawing_link_area = True
-                # Handle closing the description popup when clicking outside
-                if description_popup_window is not None:
-                    popup_rect = description_popup_window.get_abs_rect()
-                    if not popup_rect.collidepoint(event.pos):
-                        description_popup_window.kill()
-                        description_popup_window = None
-                        description_text_box = None
+                        else:
+                            # Assign image folder to the clicked tile
+                            directory = open_file_explorer()
+                            if directory:
+                                tile.set_directory(directory)
+                                bring_window_to_front()
+                    # Handle closing the description popup when clicking outside
+                    if description_popup_window is not None:
+                        popup_rect = description_popup_window.get_abs_rect()
+                        if not popup_rect.collidepoint(event.pos):
+                            description_popup_window.kill()
+                            description_popup_window = None
+                            description_text_box = None
         elif event.type == pygame.MOUSEBUTTONUP:
             if drawing_link_area and event.button == 1:
                 drawing_link_area = False
@@ -538,23 +551,10 @@ while running:
             elif event.ui_element == image_button:
                 directory = open_file_explorer()
                 if directory:
-                    # Enter image viewing mode
-                    image_viewing_mode = True
-                    image_viewing_directory = directory
-                    image_viewing_images = [os.path.join(directory, f) for f in os.listdir(directory)
-                                            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
-                    image_viewing_images.sort()
-                    image_viewing_index = 0
-                    # Load link areas from the directory's link_areas.json
-                    load_image_viewing_link_areas()
-                    # Create the get back button
-                    if get_back_button is None:
-                        get_back_button = pygame_gui.elements.UIButton(
-                            relative_rect=pygame.Rect((10, 70), (50, 50)),
-                            text="Back",
-                            manager=manager
-                        )
-                    bring_window_to_front()  # Ensure window is brought to the front after loading
+                    # Assign image folder to the current tile
+                    current_tile = tile_system.get_current_tile()
+                    current_tile.set_directory(directory)
+                    bring_window_to_front()
             elif event.ui_element == delete_button:
                 current_tile = tile_system.get_current_tile()
                 current_tile.clear_directory()
@@ -628,6 +628,9 @@ while running:
             elif event.ui_element == show_links_button:
                 show_link_areas = not show_link_areas
                 show_links_button.set_text(f"Show Links: {'ON' if show_link_areas else 'OFF'}")
+            elif event.ui_element == grid_toggle_button:
+                tile_system.grid_visible = not tile_system.grid_visible
+                grid_toggle_button.set_text(f"Grid: {'ON' if tile_system.grid_visible else 'OFF'}")
             elif event.ui_element == reset_zoom_button:
                 zoom_factor = 1.0  # Reset zoom to default
             elif event.ui_element == maximize_button:
@@ -705,6 +708,19 @@ while running:
                     set_bg_button = pygame_gui.elements.UIButton(
                         relative_rect=pygame.Rect((-80, 0), (80, 30)),
                         text="Set BG",
+                        manager=manager,
+                        container=tile_window,
+                        anchors={
+                            'left': 'right',
+                            'right': 'right',
+                            'top': 'top',
+                            'bottom': 'top'
+                        }
+                    )
+                    # Add Grid Toggle Button to the tile window's title bar
+                    grid_toggle_button = pygame_gui.elements.UIButton(
+                        relative_rect=pygame.Rect((-320, 0), (80, 30)),
+                        text="Grid: ON",
                         manager=manager,
                         container=tile_window,
                         anchors={
