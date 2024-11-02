@@ -14,6 +14,7 @@ COLOR2 = (68, 71, 90)
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 BLUE = (0, 0, 255)
+GREEN = (0, 255, 0)
 
 # Player's starting position and direction
 player_pos = [0, 0]  # Starting at (0, 0)
@@ -24,6 +25,7 @@ edit_mode = False
 json_link_mode = False
 clear_json_link_mode = False
 link_area_mode = False  # New mode for adding link areas
+grid_visible = True  # Grid lines are visible by default
 
 # Image management
 current_image_index = 0
@@ -68,22 +70,21 @@ class Tile:
         self.link_areas = {}  # Dictionary with image_index as key
 
     # Methods for the Tile class
-    def draw(self, surface, mouse_pos, offset_x, offset_y, zoom_factor):
+    def draw(self, surface, offset_x, offset_y, zoom_factor):
         scaled_size = self.size * zoom_factor
         tile_pos_x = self.col * scaled_size + offset_x
         tile_pos_y = self.row * scaled_size + offset_y
         adjusted_rect = pygame.Rect(tile_pos_x, tile_pos_y, scaled_size, scaled_size)
 
-        # Draw only the grid lines to make tiles transparent
-        if adjusted_rect.collidepoint(mouse_pos) and (edit_mode or json_link_mode or clear_json_link_mode):
-            line_color = BLACK
+        if self.directory:
+            # Draw grid lines in green if tile has an image folder assigned
+            pygame.draw.rect(surface, GREEN, adjusted_rect, 1)
+        elif self.json_file:
+            # Draw grid lines in blue if tile has a JSON file assigned
+            pygame.draw.rect(surface, BLUE, adjusted_rect, 1)
         else:
-            if self.json_file:
-                line_color = BLUE
-            else:
-                line_color = COLOR2 if self.active else BLACK
-
-        pygame.draw.rect(surface, line_color, adjusted_rect, 1)  # Draw grid lines only
+            # Draw grid lines in black
+            pygame.draw.rect(surface, BLACK, adjusted_rect, 1)
 
     def toggle_active(self):
         self.active = not self.active
@@ -176,14 +177,19 @@ def draw_board(mouse_pos, offset_x, offset_y, surface, visible_area, zoom_factor
         # Draw the background image
         surface.blit(bg_image_scaled, (bg_pos_x + offset_x, bg_pos_y + offset_y))
 
-    # Draw the tiles (with transparency)
-    for key, tile in tiles.items():
-        scaled_size = tile.size * zoom_factor
-        tile_pos_x = tile.col * scaled_size + offset_x
-        tile_pos_y = tile.row * scaled_size + offset_y
-        tile_rect = pygame.Rect(tile_pos_x, tile_pos_y, scaled_size, scaled_size)
-        if tile_rect.colliderect(visible_area):
-            tile.draw(surface, mouse_pos, offset_x, offset_y, zoom_factor)
+    # Determine the range of tiles to draw based on visible area
+    scaled_square_size = SQUARE_SIZE * zoom_factor
+    start_col = int(-offset_x // scaled_square_size) - 1
+    end_col = int((visible_area.width - offset_x) // scaled_square_size) + 1
+    start_row = int(-offset_y // scaled_square_size) - 1
+    end_row = int((visible_area.height - offset_y) // scaled_square_size) + 1
+
+    # Draw the grid lines
+    if grid_visible:
+        for row in range(start_row, end_row):
+            for col in range(start_col, end_col):
+                tile = get_tile(row, col)
+                tile.draw(surface, offset_x, offset_y, zoom_factor)
 
 def draw_player(offset_x, offset_y, surface, zoom_factor):
     scaled_size = SQUARE_SIZE * zoom_factor
@@ -330,7 +336,6 @@ def remove_current_tile_folder():
 def clear_current_tile_json_link():
     current_tile = get_current_tile()
     current_tile.clear_json_file()
-    current_tile.color = WHITE  # Reset color to white to indicate no link
     print(f"Cleared JSON link from the current tile.")
 
 # Function to set the background image
@@ -397,7 +402,8 @@ def serialize_game_state():
         "player_position": player_pos.copy(),
         "player_direction": player_direction,
         "tiles": [],
-        "background_image_path": background_image_path  # Save the background image path
+        "background_image_path": background_image_path,  # Save the background image path
+        "grid_visible": grid_visible  # Save the grid visibility state
     }
     for key, tile in tiles.items():
         # Prepare link areas for JSON serialization
@@ -424,11 +430,12 @@ def serialize_game_state():
     return game_state
 
 def load_game_state_from_dict(game_state):
-    global player_pos, player_direction, tiles, current_image_index, background_image, background_image_path
+    global player_pos, player_direction, tiles, current_image_index, background_image, background_image_path, grid_visible
 
     try:
         player_pos[:] = game_state["player_position"]
         player_direction = game_state["player_direction"]
+        grid_visible = game_state.get("grid_visible", True)  # Load grid visibility state
 
         # Clear the current game state
         tiles.clear()
@@ -517,5 +524,5 @@ __all__ = [
     'save_game_state', 'load_game_state', 'load_game_state_from_file', 'link_area_mode',
     'save_current_state_to_history', 'go_back', 'go_forward',
     'bring_window_to_front', 'load_image', 'SQUARE_SIZE', 'set_background_image',
-    'cv2_to_pygame'
+    'cv2_to_pygame', 'grid_visible'
 ]
