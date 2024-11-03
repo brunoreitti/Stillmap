@@ -202,10 +202,11 @@ for i, text in enumerate(button_texts):
 # Adjust tile window size to match the original size
 tile_window_width = SQUARE_SIZE * 9  # Original width (e.g., 324 pixels)
 tile_window_height = SQUARE_SIZE * 9  # Original height (e.g., 324 pixels)
+tile_window_bottom_bar_height = 60  # Height of the bottom bar in the tile window
 
 # Create the tile window in the top right corner
 tile_window = pygame_gui.elements.UIWindow(
-    rect=pygame.Rect((screen_width - tile_window_width - 10, 10), (tile_window_width, tile_window_height)),
+    rect=pygame.Rect((screen_width - tile_window_width - 10, 10), (tile_window_width, tile_window_height + tile_window_bottom_bar_height)),
     manager=manager,
     window_display_title="Tile System",
     object_id="#tile_window"
@@ -214,10 +215,51 @@ tile_window = pygame_gui.elements.UIWindow(
 # Create a UIImage inside the tile window to display the tiles
 tile_image_surface = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
 tile_image = pygame_gui.elements.UIImage(
-    relative_rect=pygame.Rect((0, 0), (tile_window_width, tile_window_height)),
+    relative_rect=pygame.Rect((0, 0), (tile_window_width -2, tile_window_height)),
     image_surface=tile_image_surface,
     manager=manager,
     container=tile_window
+)
+
+# Create a bottom bar inside the tile window
+tile_window_bottom_bar = pygame_gui.elements.UIPanel(
+    relative_rect=pygame.Rect((0, tile_window_height), (tile_window_width, tile_window_bottom_bar_height)),
+    manager=manager,
+    container=tile_window,
+    object_id="#tile_window_bottom_bar"
+)
+
+# Create buttons in the bottom bar of the tile window
+tile_window_button_width = (tile_window_width - 50) // 4  # Adjust as needed
+tile_window_button_height = tile_window_bottom_bar_height - 10  # Adjust as needed
+tile_window_button_padding = 10
+
+grid_toggle_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((tile_window_button_padding, 5), (tile_window_button_width, tile_window_button_height)),
+    text="Grid: ON",
+    manager=manager,
+    container=tile_window_bottom_bar
+)
+
+reset_zoom_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((tile_window_button_padding * 2 + tile_window_button_width, 5), (tile_window_button_width, tile_window_button_height)),
+    text="Reset Zoom",
+    manager=manager,
+    container=tile_window_bottom_bar
+)
+
+maximize_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((tile_window_button_padding * 3 + tile_window_button_width * 2, 5), (tile_window_button_width, tile_window_button_height)),
+    text="Maximize",
+    manager=manager,
+    container=tile_window_bottom_bar
+)
+
+set_bg_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((tile_window_button_padding * 4 + tile_window_button_width * 3, 5), (tile_window_button_width, tile_window_button_height)),
+    text="Set BG",
+    manager=manager,
+    container=tile_window_bottom_bar
 )
 
 tile_window_visible = True  # Flag to track if the tile window is visible
@@ -229,62 +271,6 @@ zoom_factor = 1.0  # Default zoom level
 # Define minimum and maximum zoom levels
 MIN_ZOOM = 0.5
 MAX_ZOOM = 3.0
-
-# Add Reset Zoom Button to the tile window's title bar
-reset_zoom_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((-240, 0), (80, 30)),  # Adjusted position
-    text="Reset Zoom",
-    manager=manager,
-    container=tile_window,
-    anchors={
-        'left': 'right',
-        'right': 'right',
-        'top': 'top',
-        'bottom': 'top'
-    }
-)
-
-# Add Maximize/Restore Button to the tile window's title bar
-maximize_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((-160, 0), (80, 30)),  # Adjusted position
-    text="Maximize",
-    manager=manager,
-    container=tile_window,
-    anchors={
-        'left': 'right',
-        'right': 'right',
-        'top': 'top',
-        'bottom': 'top'
-    }
-)
-
-# Add Set Background Button to the tile window's title bar
-set_bg_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((-80, 0), (80, 30)),  # Adjusted position
-    text="Set BG",
-    manager=manager,
-    container=tile_window,
-    anchors={
-        'left': 'right',
-        'right': 'right',
-        'top': 'top',
-        'bottom': 'top'
-    }
-)
-
-# Add Grid Toggle Button to the tile window's title bar
-grid_toggle_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((-320, 0), (80, 30)),  # Adjusted position
-    text="Grid: ON",
-    manager=manager,
-    container=tile_window,
-    anchors={
-        'left': 'right',
-        'right': 'right',
-        'top': 'top',
-        'bottom': 'top'
-    }
-)
 
 # Create the restore button in the top right corner
 restore_tile_window_button = pygame_gui.elements.UIButton(
@@ -386,8 +372,11 @@ while running:
                     image_display_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
                     tile_window.set_relative_position((image_display_area.left, image_display_area.top))
                     tile_window.set_dimensions((image_display_area.width, image_display_area.height))
-                    tile_image.set_dimensions((image_display_area.width, image_display_area.height))
-                    tile_image_surface = pygame.Surface((image_display_area.width, image_display_area.height), pygame.SRCALPHA)
+                    tile_image.set_dimensions((image_display_area.width, image_display_area.height - tile_window_bottom_bar_height))
+                    tile_image.set_relative_position((0, 0))
+                    tile_window_bottom_bar.set_relative_position((0, image_display_area.height - tile_window_bottom_bar_height))
+                    tile_window_bottom_bar.set_dimensions((image_display_area.width, tile_window_bottom_bar_height))
+                    tile_image_surface = pygame.Surface((image_display_area.width, image_display_area.height - tile_window_bottom_bar_height), pygame.SRCALPHA)
                     tile_image.set_image(tile_image_surface)
                 else:
                     tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
@@ -641,15 +630,21 @@ while running:
                     image_display_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
                     tile_window.set_relative_position((image_display_area.left, image_display_area.top))
                     tile_window.set_dimensions((image_display_area.width, image_display_area.height))
-                    tile_image.set_dimensions((image_display_area.width, image_display_area.height))
-                    tile_image_surface = pygame.Surface((image_display_area.width, image_display_area.height), pygame.SRCALPHA)
+                    tile_image.set_dimensions((image_display_area.width, image_display_area.height - tile_window_bottom_bar_height))
+                    tile_image.set_relative_position((0, 0))
+                    tile_window_bottom_bar.set_relative_position((0, image_display_area.height - tile_window_bottom_bar_height))
+                    tile_window_bottom_bar.set_dimensions((image_display_area.width, tile_window_bottom_bar_height))
+                    tile_image_surface = pygame.Surface((image_display_area.width, image_display_area.height - tile_window_bottom_bar_height), pygame.SRCALPHA)
                     tile_image.set_image(tile_image_surface)
                 else:
                     # Restore the tile window to its original size and position
                     maximize_button.set_text("Maximize")
                     tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
-                    tile_window.set_dimensions((tile_window_width, tile_window_height))
+                    tile_window.set_dimensions((tile_window_width, tile_window_height + tile_window_bottom_bar_height))
                     tile_image.set_dimensions((tile_window_width, tile_window_height))
+                    tile_image.set_relative_position((0, 0))
+                    tile_window_bottom_bar.set_relative_position((0, tile_window_height))
+                    tile_window_bottom_bar.set_dimensions((tile_window_width, tile_window_bottom_bar_height))
                     tile_image_surface = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
                     tile_image.set_image(tile_image_surface)
             elif event.ui_element == set_bg_button:
@@ -665,7 +660,7 @@ while running:
                 if tile_window is None:
                     # Recreate the tile window
                     tile_window = pygame_gui.elements.UIWindow(
-                        rect=pygame.Rect((screen_width - tile_window_width - 10, 10), (tile_window_width, tile_window_height)),
+                        rect=pygame.Rect((screen_width - tile_window_width - 10, 10), (tile_window_width, tile_window_height + tile_window_bottom_bar_height)),
                         manager=manager,
                         window_display_title="Tile System",
                         object_id="#tile_window"
@@ -678,57 +673,37 @@ while running:
                         manager=manager,
                         container=tile_window
                     )
-                    # Add Reset Zoom Button to the tile window's title bar
-                    reset_zoom_button = pygame_gui.elements.UIButton(
-                        relative_rect=pygame.Rect((-240, 0), (80, 30)),
-                        text="Reset Zoom",
+                    # Recreate the bottom bar
+                    tile_window_bottom_bar = pygame_gui.elements.UIPanel(
+                        relative_rect=pygame.Rect((0, tile_window_height), (tile_window_width, tile_window_bottom_bar_height)),
                         manager=manager,
                         container=tile_window,
-                        anchors={
-                            'left': 'right',
-                            'right': 'right',
-                            'top': 'top',
-                            'bottom': 'top'
-                        }
+                        object_id="#tile_window_bottom_bar"
                     )
-                    # Add Maximize/Restore Button to the tile window's title bar
-                    maximize_button = pygame_gui.elements.UIButton(
-                        relative_rect=pygame.Rect((-160, 0), (80, 30)),
-                        text="Maximize",
-                        manager=manager,
-                        container=tile_window,
-                        anchors={
-                            'left': 'right',
-                            'right': 'right',
-                            'top': 'top',
-                            'bottom': 'top'
-                        }
-                    )
-                    # Add Set Background Button to the tile window's title bar
-                    set_bg_button = pygame_gui.elements.UIButton(
-                        relative_rect=pygame.Rect((-80, 0), (80, 30)),
-                        text="Set BG",
-                        manager=manager,
-                        container=tile_window,
-                        anchors={
-                            'left': 'right',
-                            'right': 'right',
-                            'top': 'top',
-                            'bottom': 'top'
-                        }
-                    )
-                    # Add Grid Toggle Button to the tile window's title bar
+                    # Recreate buttons in the bottom bar
                     grid_toggle_button = pygame_gui.elements.UIButton(
-                        relative_rect=pygame.Rect((-320, 0), (80, 30)),
+                        relative_rect=pygame.Rect((tile_window_button_padding, 5), (tile_window_button_width, tile_window_button_height)),
                         text="Grid: ON",
                         manager=manager,
-                        container=tile_window,
-                        anchors={
-                            'left': 'right',
-                            'right': 'right',
-                            'top': 'top',
-                            'bottom': 'top'
-                        }
+                        container=tile_window_bottom_bar
+                    )
+                    reset_zoom_button = pygame_gui.elements.UIButton(
+                        relative_rect=pygame.Rect((tile_window_button_padding * 2 + tile_window_button_width, 5), (tile_window_button_width, tile_window_button_height)),
+                        text="Reset Zoom",
+                        manager=manager,
+                        container=tile_window_bottom_bar
+                    )
+                    maximize_button = pygame_gui.elements.UIButton(
+                        relative_rect=pygame.Rect((tile_window_button_padding * 3 + tile_window_button_width * 2, 5), (tile_window_button_width, tile_window_button_height)),
+                        text="Maximize",
+                        manager=manager,
+                        container=tile_window_bottom_bar
+                    )
+                    set_bg_button = pygame_gui.elements.UIButton(
+                        relative_rect=pygame.Rect((tile_window_button_padding * 4 + tile_window_button_width * 3, 5), (tile_window_button_width, tile_window_button_height)),
+                        text="Set BG",
+                        manager=manager,
+                        container=tile_window_bottom_bar
                     )
                     tile_window_visible = True
             elif event.ui_element == get_back_button:
