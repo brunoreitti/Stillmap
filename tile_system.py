@@ -52,6 +52,9 @@ tiles = {}  # Key: (row, col), Value: Tile object
 background_image = None  # Pygame Surface for the background image
 background_image_path = None  # Path to the background image file
 
+# Map view offset for panning
+map_offset = [0, 0]  # [offset_x, offset_y]
+
 # Tile class definition
 class Tile:
     def __init__(self, row, col):
@@ -150,10 +153,15 @@ def initialize():
     tiles = {}  # Clear existing tiles if any
 
 def get_tile(row, col):
+    return tiles.get((row, col))
+
+def create_tile(row, col):
     key = (row, col)
     if key not in tiles:
         tiles[key] = Tile(row, col)
-    return tiles[key]
+        print(f"Created tile at position ({row}, {col})")
+    else:
+        print(f"Tile at position ({row}, {col}) already exists.")
 
 def get_current_tile():
     return get_tile(player_pos[0], player_pos[1])
@@ -175,27 +183,27 @@ def draw_board(mouse_pos, offset_x, offset_y, surface, visible_area, zoom_factor
         bg_pos_y = 0
 
         # Draw the background image
-        surface.blit(bg_image_scaled, (bg_pos_x + offset_x, bg_pos_y + offset_y))
+        surface.blit(bg_image_scaled, (bg_pos_x + offset_x + map_offset[0], bg_pos_y + offset_y + map_offset[1]))
 
     # Determine the range of tiles to draw based on visible area
     scaled_square_size = SQUARE_SIZE * zoom_factor
-    start_col = int(-offset_x // scaled_square_size) - 1
-    end_col = int((visible_area.width - offset_x) // scaled_square_size) + 1
-    start_row = int(-offset_y // scaled_square_size) - 1
-    end_row = int((visible_area.height - offset_y) // scaled_square_size) + 1
+    start_col = int((-offset_x - map_offset[0]) // scaled_square_size) - 1
+    end_col = int((visible_area.width - offset_x - map_offset[0]) // scaled_square_size) + 1
+    start_row = int((-offset_y - map_offset[1]) // scaled_square_size) - 1
+    end_row = int((visible_area.height - offset_y - map_offset[1]) // scaled_square_size) + 1
 
-    # Draw the grid lines
-    if grid_visible:
-        for row in range(start_row, end_row):
-            for col in range(start_col, end_col):
-                tile = get_tile(row, col)
-                tile.draw(surface, offset_x, offset_y, zoom_factor)
+    # Draw existing tiles
+    for row in range(start_row, end_row):
+        for col in range(start_col, end_col):
+            tile = get_tile(row, col)
+            if tile:
+                tile.draw(surface, offset_x + map_offset[0], offset_y + map_offset[1], zoom_factor)
 
 def draw_player(offset_x, offset_y, surface, zoom_factor):
     scaled_size = SQUARE_SIZE * zoom_factor
     player_rect = pygame.Rect(
-        player_pos[1] * scaled_size + offset_x,
-        player_pos[0] * scaled_size + offset_y,
+        player_pos[1] * scaled_size + offset_x + map_offset[0],
+        player_pos[0] * scaled_size + offset_y + map_offset[1],
         scaled_size,
         scaled_size
     )
@@ -256,6 +264,30 @@ def draw_player(offset_x, offset_y, surface, zoom_factor):
             (center_x, center_y - arrow_width)
         ])
 
+def draw_ghost_tile(row, col, offset_x, offset_y, surface, zoom_factor):
+    scaled_size = SQUARE_SIZE * zoom_factor
+    tile_pos_x = col * scaled_size + offset_x + map_offset[0]
+    tile_pos_y = row * scaled_size + offset_y + map_offset[1]
+    adjusted_rect = pygame.Rect(tile_pos_x, tile_pos_y, scaled_size, scaled_size)
+    # Draw a semi-transparent rectangle
+    ghost_color = (255, 255, 255, 100)  # White with alpha
+    ghost_surface = pygame.Surface((int(adjusted_rect.width), int(adjusted_rect.height)), pygame.SRCALPHA)
+    ghost_surface.fill(ghost_color)
+    surface.blit(ghost_surface, adjusted_rect.topleft)
+    # Draw arrow indicating player direction
+    center_x = adjusted_rect.centerx
+    center_y = adjusted_rect.centery
+    arrow_length = scaled_size // 2
+    arrow_width = max(1, int(2 * zoom_factor))
+    arrow_color = (0, 0, 0, 150)
+    arrow_surface = pygame.Surface((int(adjusted_rect.width), int(adjusted_rect.height)), pygame.SRCALPHA)
+    pygame.draw.polygon(arrow_surface, arrow_color, [
+        (adjusted_rect.width / 2, adjusted_rect.height / 2 - arrow_length),
+        (adjusted_rect.width / 2 - arrow_width, adjusted_rect.height / 2),
+        (adjusted_rect.width / 2 + arrow_width, adjusted_rect.height / 2)
+    ])
+    surface.blit(arrow_surface, adjusted_rect.topleft)
+
 def move_player(forward=True):
     global player_pos, current_image_index
 
@@ -284,29 +316,41 @@ def move_player(forward=True):
         new_pos[1] -= 1
 
     new_tile = get_tile(new_pos[0], new_pos[1])
-    if new_tile.active:
+    if new_tile and new_tile.active:
         player_pos[:] = new_pos
         current_image_index = 0  # Reset image index when moving to a new tile
         print(f"Moved to position: {new_pos}")
     else:
-        print("Cannot move to inactive tile.")
+        print("Cannot move to inactive or non-existent tile.")
 
 def rotate_player(key):
     global player_direction, current_image_index
     if key == pygame.K_LEFT:
         player_direction = (player_direction - 1) % 8
         current_tile = get_current_tile()
-        if current_tile.image_filenames:
+        if current_tile and current_tile.image_filenames:
             current_image_index = (current_image_index - 1) % len(current_tile.image_filenames)
         else:
             current_image_index = 0
     elif key == pygame.K_RIGHT:
         player_direction = (player_direction + 1) % 8
         current_tile = get_current_tile()
-        if current_tile.image_filenames:
+        if current_tile and current_tile.image_filenames:
             current_image_index = (current_image_index + 1) % len(current_tile.image_filenames)
         else:
             current_image_index = 0
+
+def move_player_to_tile(row, col):
+    """Move the player arrow to the specified tile if it exists and is active."""
+    global player_pos, current_image_index
+    target_tile = get_tile(row, col)
+    if target_tile and target_tile.active:
+        player_pos[:] = [row, col]
+        current_image_index = 0  # Reset image index when moving to a new tile
+        reset_map_view()  # Reset the map view to center on the player
+        print(f"Player moved to tile ({row}, {col})")
+    else:
+        print(f"Cannot move to tile ({row}, {col}). Tile does not exist or is inactive.")
 
 def toggle_edit_mode():
     global edit_mode
@@ -324,25 +368,39 @@ def toggle_clear_json_link_mode():
 
 def edit_text():
     current_tile = get_current_tile()
-    new_text = simpledialog.askstring("Edit Description", "Enter new text:", initialvalue=current_tile.text_content)
-    if new_text is not None:
-        current_tile.text_content = new_text
+    if current_tile:
+        new_text = simpledialog.askstring("Edit Description", "Enter new text:", initialvalue=current_tile.text_content)
+        if new_text is not None:
+            current_tile.text_content = new_text
+    else:
+        messagebox.showwarning("No Tile", "No tile exists at the player's current position.")
 
 def remove_current_tile_folder():
     current_tile = get_current_tile()
-    current_tile.clear_directory()
-    print(f"Removed folder association from the current tile.")
+    if current_tile:
+        current_tile.clear_directory()
+        print(f"Removed folder association from the current tile.")
+    else:
+        print("No current tile to remove directory.")
 
 def clear_current_tile_json_link():
     current_tile = get_current_tile()
-    current_tile.clear_json_file()
-    print(f"Cleared JSON link from the current tile.")
+    if current_tile:
+        current_tile.clear_json_file()
+        print(f"Cleared JSON link from the current tile.")
+    else:
+        print("No current tile to clear JSON link.")
 
 # Function to set the background image
 def set_background_image(image_surface, image_path):
     global background_image, background_image_path
     background_image = image_surface
     background_image_path = image_path
+
+def reset_map_view():
+    global map_offset
+    map_offset = [0, 0]
+    print("Map view reset to follow the player.")
 
 # Functions to save and load the game state
 def save_game_state():
@@ -403,7 +461,8 @@ def serialize_game_state():
         "player_direction": player_direction,
         "tiles": [],
         "background_image_path": background_image_path,  # Save the background image path
-        "grid_visible": grid_visible  # Save the grid visibility state
+        "grid_visible": grid_visible,  # Save the grid visibility state
+        "map_offset": map_offset  # Save the map view offset
     }
     for key, tile in tiles.items():
         # Prepare link areas for JSON serialization
@@ -430,12 +489,13 @@ def serialize_game_state():
     return game_state
 
 def load_game_state_from_dict(game_state):
-    global player_pos, player_direction, tiles, current_image_index, background_image, background_image_path, grid_visible
+    global player_pos, player_direction, tiles, current_image_index, background_image, background_image_path, grid_visible, map_offset
 
     try:
         player_pos[:] = game_state["player_position"]
         player_direction = game_state["player_direction"]
         grid_visible = game_state.get("grid_visible", True)  # Load grid visibility state
+        map_offset = game_state.get("map_offset", [0, 0])  # Load map view offset
 
         # Clear the current game state
         tiles.clear()
@@ -524,5 +584,6 @@ __all__ = [
     'save_game_state', 'load_game_state', 'load_game_state_from_file', 'link_area_mode',
     'save_current_state_to_history', 'go_back', 'go_forward',
     'bring_window_to_front', 'load_image', 'SQUARE_SIZE', 'set_background_image',
-    'cv2_to_pygame', 'grid_visible'
+    'cv2_to_pygame', 'grid_visible', 'draw_ghost_tile', 'create_tile',
+    'map_offset', 'reset_map_view', 'move_player_to_tile'  # Added move_player_to_tile to exports
 ]
