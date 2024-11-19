@@ -10,6 +10,8 @@ from tkinter import Tk, filedialog, simpledialog, messagebox
 import cv2
 import numpy as np
 import subprocess
+from pdf2image import convert_from_path  # For PDF support
+import cairosvg  # For SVG support
 
 # Import the tile_system module
 import tile_system
@@ -17,11 +19,102 @@ import tile_system
 # Initialize Pygame and Pygame GUI
 pygame.init()
 
+# Define your functions here before you use them
+
+def load_image_with_orientation(filepath):
+    # Determine file extension
+    _, ext = os.path.splitext(filepath)
+    ext = ext.lower()
+
+    if ext == '.pdf':
+        return load_pdf_page(filepath)
+    elif ext == '.svg':
+        return load_svg_image(filepath)
+    else:
+        image = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)  # Use IMREAD_UNCHANGED to keep alpha channel
+        if image is None:
+            raise ValueError("Image not found or unable to load")
+        try:
+            # Handle EXIF orientation if necessary
+            from PIL import Image, ExifTags
+
+            pil_image = Image.open(filepath)
+            exif = pil_image._getexif()
+            if exif is not None:
+                orientation_key = next(
+                    (key for key, val in ExifTags.TAGS.items() if val == 'Orientation'), None)
+                if orientation_key is not None and orientation_key in exif:
+                    orientation = exif[orientation_key]
+                    if orientation == 3:
+                        image = cv2.rotate(image, cv2.ROTATE_180)
+                    elif orientation == 6:
+                        image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+                    elif orientation == 8:
+                        image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        except Exception as e:
+            print(f"EXIF orientation handling failed: {e}")
+        return image
+
+def load_image(filepath):
+    try:
+        return load_image_with_orientation(filepath)
+    except Exception as e:
+        print(f"Failed to load image {filepath}: {e}")
+        return None
+
+def cv2_to_pygame(image):
+    """Convert an OpenCV image to a Pygame surface, handling alpha channel."""
+    if image.shape[2] == 4:
+        # Image has alpha channel
+        image_rgba = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
+        return pygame.image.frombuffer(image_rgba.tobytes(), image_rgba.shape[1::-1], 'RGBA')
+    else:
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return pygame.image.frombuffer(image_rgb.tobytes(), image_rgb.shape[1::-1], 'RGB')
+
+def load_pdf_page(pdf_path, page_number=0, dpi=300):
+    try:
+        pages = convert_from_path(pdf_path, dpi=dpi)
+        if pages:
+            # Convert PIL Image to OpenCV image
+            pil_image = pages[page_number]
+            open_cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGBA2BGRA)
+            return open_cv_image
+        else:
+            print(f"No pages found in PDF: {pdf_path}")
+            return None
+    except Exception as e:
+        print(f"Failed to load PDF {pdf_path}: {e}")
+        return None
+
+def load_svg_image(svg_path, output_width=None, output_height=None):
+    try:
+        # Render SVG to PNG bytes
+        png_data = cairosvg.svg2png(url=svg_path, output_width=output_width, output_height=output_height)
+        # Convert PNG bytes to OpenCV image
+        nparr = np.frombuffer(png_data, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+        return image
+    except Exception as e:
+        print(f"Failed to load SVG {svg_path}: {e}")
+        return None
+
+# Now, you can call load_image and cv2_to_pygame
+
+# Load the default image (can be PNG, PDF, or SVG)
+DEFAULT_IMAGE_PATH = 'earthscanlogo3.svg'  # Replace with your default image path
+default_image_cv2 = load_image(DEFAULT_IMAGE_PATH)
+if default_image_cv2 is not None:
+    pass  # The image is loaded into default_image_cv2
+else:
+    print(f"Failed to load default image from {DEFAULT_IMAGE_PATH}")
+    default_image_cv2 = None  # Handle the case where the image couldn't be loaded
+
 # Create a resizable Pygame window
 screen = pygame.display.set_mode((800, 600), pygame.RESIZABLE)
-pygame.display.set_caption("viewalk software")
+pygame.display.set_caption("MAPPIC software")
 
-icon = pygame.image.load('viewalk.ico')
+icon = pygame.image.load('mappiclogo.ico')
 pygame.display.set_icon(icon)
 
 # Get the handle of the Pygame window
@@ -60,7 +153,7 @@ def open_file_explorer():
 
 def open_image_file_explorer():
     filetypes = (
-        ('Image files', '*.png;*.jpg;*.jpeg;*.bmp;*.gif'),
+        ('Supported files', '*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.pdf;*.svg'),
         ('All files', '*.*')
     )
     filename = filedialog.askopenfilename(
@@ -68,43 +161,6 @@ def open_image_file_explorer():
         initialdir=os.getcwd(),
         filetypes=filetypes)
     return filename
-
-def load_image_with_orientation(filepath):
-    image = cv2.imread(filepath)
-    if image is None:
-        raise ValueError("Image not found or unable to load")
-    try:
-        # Handle EXIF orientation if necessary
-        from PIL import Image, ExifTags
-
-        pil_image = Image.open(filepath)
-        exif = pil_image._getexif()
-        if exif is not None:
-            orientation_key = next(
-                (key for key, val in ExifTags.TAGS.items() if val == 'Orientation'), None)
-            if orientation_key is not None and orientation_key in exif:
-                orientation = exif[orientation_key]
-                if orientation == 3:
-                    image = cv2.rotate(image, cv2.ROTATE_180)
-                elif orientation == 6:
-                    image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-                elif orientation == 8:
-                    image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    except Exception as e:
-        print(f"EXIF orientation handling failed: {e}")
-    return image
-
-def load_image(filepath):
-    try:
-        return load_image_with_orientation(filepath)
-    except Exception as e:
-        print(f"Failed to load image {filepath}: {e}")
-        return None
-
-def cv2_to_pygame(image):
-    """Convert an OpenCV image to a Pygame surface."""
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    return pygame.image.frombuffer(image_rgb.tobytes(), image_rgb.shape[1::-1], 'RGB')
 
 # Function to handle clicking on a link in the message box
 def handle_link_click(link):
@@ -178,7 +234,7 @@ bottom_bar_panel = pygame_gui.elements.UIPanel(
 button_padding = 10
 button_height = 40
 button_texts = ["Load Game", "Save Game", "Edit Mode", "Select Image Folder", "Remove Image Folder",
-                "Edit Description", "Manage JSON Links", "Clear JSON Links", "Add Link Area", "Assign Link Folder", "Assign JSON Area", "Show Links"]
+                "Manage JSON Links", "Clear JSON Links", "Add Link Area", "Assign Link Folder", "Assign JSON Area", "Show Links"]
 num_buttons = len(button_texts)
 button_width = (screen_width - (num_buttons + 1) * button_padding) // num_buttons
 
@@ -196,8 +252,8 @@ for i, text in enumerate(button_texts):
 
 # Assign buttons to variables
 (load_button, save_button, edit_button, image_button, delete_button,
- edit_text_button, json_link_button,
- clear_json_link_button, add_link_area_button, assign_link_folder_button, assign_json_area_button, show_links_button) = buttons
+ json_link_button, clear_json_link_button, add_link_area_button, assign_link_folder_button,
+ assign_json_area_button, show_links_button) = buttons
 
 # Adjust tile window size to match the original size
 tile_window_width = SQUARE_SIZE * 9  # Original width (e.g., 324 pixels)
@@ -299,10 +355,6 @@ assign_json_area_mode = False
 # Variable to show or hide link areas
 show_link_areas = False
 
-# Variable for the description popup window
-description_popup_window = None
-description_text_box = None  # To store the text box inside the popup
-
 # Create the back and forward buttons in the top left corner
 back_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((10, 10), (50, 50)),
@@ -341,14 +393,9 @@ last_click_time = 0
 DOUBLE_CLICK_TIME = 500  # Time in milliseconds
 last_click_pos = None
 
-# Function to show confirmation on a button
-def show_button_confirmation(button, confirmation_text, duration=2000):
-    global original_button_texts, confirmation_end_time, confirmation_button
-    original_button_texts[button] = button.text
-    button.set_text(confirmation_text)
-    confirmation_end_time = pygame.time.get_ticks() + duration
-    confirmation_button = button
-    print("Button confirmation displayed:", confirmation_text)
+# Variables for Move Tile Mode
+move_tile_button = None  # Variable to store the "Move" button
+move_tile_mode = False  # Flag to track if move mode is active
 
 # Main game loop
 running = True
@@ -357,6 +404,74 @@ confirmation_end_time = 0  # To track when to revert the button text
 
 # Variables to store the original size and position of the tile window
 original_tile_window_rect = tile_window.get_relative_rect().copy()
+
+def update_move_button_position():
+    if move_tile_button is not None and tile_window is not None:
+        # Calculate position
+        move_button_width = 100
+        move_button_height = 40
+
+        # Get the tile_image_rect
+        tile_image_rect = tile_image.get_abs_rect()
+
+        # Get the player's position
+        player_row, player_col = tile_system.player_pos[0], tile_system.player_pos[1]
+
+        # Calculate the scaled size of the tiles
+        scaled_size = SQUARE_SIZE * zoom_factor
+
+        # Calculate offset_x and offset_y
+        offset_x = tile_image_rect.width // 2 - player_col * scaled_size
+        offset_y = tile_image_rect.height // 2 - player_row * scaled_size
+
+        # Desired position relative to the player's position
+        desired_tile_col = player_col + 5  # Adjust as needed
+        desired_tile_row = player_row  # Adjust as needed
+
+        # Calculate the position
+        tile_pos_x = desired_tile_col * scaled_size + offset_x + tile_system.map_offset[0]
+        tile_pos_y = desired_tile_row * scaled_size + offset_y + tile_system.map_offset[1]
+
+        # Calculate the absolute position on the screen
+        move_button_x = tile_image_rect.left + tile_pos_x
+        move_button_y = tile_image_rect.top + tile_pos_y
+
+        move_tile_button.set_relative_position((move_button_x, move_button_y))
+
+def display_image(current_image):
+    if current_image is not None:
+        img_height, img_width = current_image.shape[:2]
+
+        display_width, display_height = image_display_area.width, image_display_area.height
+
+        # Calculate scale factors and new dimensions
+        scale_factor = min(display_width / img_width, display_height / img_height)
+        new_width = int(img_width * scale_factor)
+        new_height = int(img_height * scale_factor)
+
+        scaled_image = cv2.resize(current_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        scaled_image_pygame = cv2_to_pygame(scaled_image)
+        image_rect = scaled_image_pygame.get_rect(center=image_display_area.center)
+
+        # Create a surface with per-pixel alpha
+        temp_surface = pygame.Surface((image_rect.width, image_rect.height), pygame.SRCALPHA)
+        temp_surface.blit(scaled_image_pygame, (0, 0))
+        screen.blit(temp_surface, image_rect.topleft)
+        return image_rect
+    else:
+        return None
+
+# Rest of your event handling code and main game loop continues here...
+# Make sure to include all your existing event handling and game loop code.
+
+# Note: Since the rest of your code remains the same, you can continue using your existing code for the event loop, input handling, and drawing routines.
+
+
+
+# (Rest of your event handling code and main game loop remains unchanged)
+
+# Please make sure to replace the `(Rest of your event handling code and main game loop remains unchanged)` with your actual event handling code and main game loop.
+
 
 while running:
     time_delta = clock.tick(60) / 1000.0  # Limits the frame rate to 60 FPS
@@ -398,6 +513,8 @@ while running:
             # Update back and forward buttons position
             back_button.set_relative_position((10, 10))
             forward_button.set_relative_position((70, 10))
+            # Update move button position
+            update_move_button_position()
         elif event.type == pygame.KEYDOWN:
             if image_viewing_mode:
                 if event.key == pygame.K_ESCAPE:
@@ -446,65 +563,74 @@ while running:
                     if (link_area_mode or assign_link_folder_mode or assign_json_area_mode) and event.button == 1:
                         link_area_start_pos = event.pos
                         drawing_link_area = True
-                    # Handle closing the description popup when clicking outside
-                    if description_popup_window is not None:
-                        popup_rect = description_popup_window.get_abs_rect()
-                        if not popup_rect.collidepoint(event.pos):
-                            description_popup_window.kill()
-                            description_popup_window = None
-                            description_text_box = None
                 else:
-                    # Handle closing the description popup when clicking outside
-                    if description_popup_window is not None:
-                        popup_rect = description_popup_window.get_abs_rect()
-                        if not popup_rect.collidepoint(event.pos):
-                            description_popup_window.kill()
-                            description_popup_window = None
-                            description_text_box = None
+                    pass  # Other handling if necessary
             else:
                 if tile_window is not None:
-                    # Get the mouse position relative to the tile window
                     tile_window_rect = tile_window.get_abs_rect()
                     tile_image_rect = tile_image.get_abs_rect()
                     if tile_image_rect.collidepoint(event.pos):
                         local_pos = (event.pos[0] - tile_image_rect.left, event.pos[1] - tile_image_rect.top)
+                        scaled_square_size = SQUARE_SIZE * zoom_factor
+                        offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
+                        offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
+                        tile_col = int((local_pos[0] - offset_x - tile_system.map_offset[0]) // scaled_square_size)
+                        tile_row = int((local_pos[1] - offset_y - tile_system.map_offset[1]) // scaled_square_size)
+
                         if event.button == 1:
-                            current_time = pygame.time.get_ticks()
-                            if last_click_time and (current_time - last_click_time) < DOUBLE_CLICK_TIME:
-                                # Check if the position is close enough
-                                if last_click_pos and (abs(event.pos[0] - last_click_pos[0]) < 10) and (abs(event.pos[1] - last_click_pos[1]) < 10):
-                                    # Double-click detected
-                                    scaled_square_size = SQUARE_SIZE * zoom_factor
-                                    offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
-                                    offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
-                                    tile_col = int((local_pos[0] - offset_x - tile_system.map_offset[0]) // scaled_square_size)
-                                    tile_row = int((local_pos[1] - offset_y - tile_system.map_offset[1]) // scaled_square_size)
-                                    # Move player to the clicked tile
-                                    tile_system.move_player_to_tile(tile_row, tile_col)
-                                    # Reset last_click_time to prevent triple-click
-                                    last_click_time = 0
+                            if add_tile_mode:
+                                tile = tile_system.get_tile(tile_row, tile_col)
+                                if tile:
+                                    if not tile.directory:
+                                        # No images assigned, delete it without prompt
+                                        tile_system.delete_tile(tile_row, tile_col)
+                                        print(f"Deleted empty tile at ({tile_row}, {tile_col})")
+                                    else:
+                                        # Tile has images assigned
+                                        confirm = messagebox.askyesno("Delete Tile", "This tile has images, are you sure you want to delete it?")
+                                        bring_window_to_front()
+                                        if confirm:
+                                            tile_system.delete_tile(tile_row, tile_col)
+                                            print(f"Deleted tile with images at ({tile_row}, {tile_col})")
+                                        else:
+                                            print("Tile deletion canceled")
                                 else:
-                                    # Not close enough; treat as first click
+                                    # No tile exists, create one
+                                    tile_system.create_tile(tile_row, tile_col)
+                                    print(f"Created tile at ({tile_row}, {tile_col})")
+                            elif move_tile_mode:
+                                # Handle tile selection or movement
+                                if tile_system.selected_tile is None:
+                                    # Select the tile at (tile_row, tile_col)
+                                    tile_system.select_tile(tile_row, tile_col)
+                                else:
+                                    # Move the selected tile to (tile_row, tile_col)
+                                    tile_system.move_selected_tile_to(tile_row, tile_col)
+                                    # Deselect the tile
+                                    tile_system.deselect_tile()
+                            else:
+                                current_time = pygame.time.get_ticks()
+                                if last_click_time and (current_time - last_click_time) < DOUBLE_CLICK_TIME:
+                                    # Check if the position is close enough
+                                    if last_click_pos and (abs(event.pos[0] - last_click_pos[0]) < 10) and (abs(event.pos[1] - last_click_pos[1]) < 10):
+                                        # Double-click detected
+                                        tile_system.move_player_to_tile(tile_row, tile_col)
+                                        # Reset last_click_time to prevent triple-click
+                                        last_click_time = 0
+                                    else:
+                                        # Not close enough; treat as first click
+                                        last_click_time = current_time
+                                        last_click_pos = event.pos
+                                else:
+                                    # First click
                                     last_click_time = current_time
                                     last_click_pos = event.pos
-                            else:
-                                # First click
-                                last_click_time = current_time
-                                last_click_pos = event.pos
-                                # Start panning
-                                panning = True
-                                pan_start_pos = event.pos
+                                    # Start panning
+                                    panning = True
+                                    pan_start_pos = event.pos
                         elif event.button == 3:
-                            # Right-click: interact with tiles
-                            scaled_square_size = SQUARE_SIZE * zoom_factor
-                            offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
-                            offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
-                            tile_col = int((local_pos[0] - offset_x - tile_system.map_offset[0]) // scaled_square_size)
-                            tile_row = int((local_pos[1] - offset_y - tile_system.map_offset[1]) // scaled_square_size)
-                            if add_tile_mode:
-                                # Create a tile at the clicked position
-                                tile_system.create_tile(tile_row, tile_col)
-                            else:
+                            # Right-click actions when add_tile_mode is off
+                            if not add_tile_mode:
                                 tile = tile_system.get_tile(tile_row, tile_col)
                                 if tile:
                                     if tile_system.edit_mode:
@@ -527,13 +653,11 @@ while running:
                                             bring_window_to_front()
                                 else:
                                     print(f"No tile exists at position ({tile_row}, {tile_col}).")
-                            # Handle closing the description popup when clicking outside
-                            if description_popup_window is not None:
-                                popup_rect = description_popup_window.get_abs_rect()
-                                if not popup_rect.collidepoint(event.pos):
-                                    description_popup_window.kill()
-                                    description_popup_window = None
-                                    description_text_box = None
+                if event.button == 1 and not tile_window.get_abs_rect().collidepoint(event.pos):
+                    if not add_tile_mode:
+                        # Start panning
+                        panning = True
+                        pan_start_pos = event.pos
         elif event.type == pygame.MOUSEBUTTONUP:
             if drawing_link_area and event.button == 1:
                 drawing_link_area = False
@@ -619,18 +743,6 @@ while running:
             elif event.ui_element == clear_json_link_button:
                 tile_system.toggle_clear_json_link_mode()
                 clear_json_link_button.set_text(f"Clear JSON Links: {'ON' if tile_system.clear_json_link_mode else 'OFF'}")
-            elif event.ui_element == edit_text_button:
-                current_tile = tile_system.get_current_tile()
-                if current_tile:
-                    new_text = simpledialog.askstring("Edit Description", "Enter new text:", initialvalue=current_tile.text_content)
-                    if new_text is not None:
-                        current_tile.text_content = new_text
-                        # Update the popup window if it's open
-                        if description_popup_window is not None and description_text_box is not None:
-                            description_text_box.set_text(f"<font color='#000000'>{current_tile.text_content}</font>")
-                            description_text_box.rebuild()
-                else:
-                    print("No current tile to edit text.")
             elif event.ui_element == add_link_area_button:
                 tile_system.link_area_mode = not tile_system.link_area_mode
                 add_link_area_button.set_text(f"Add Link Area: {'ON' if tile_system.link_area_mode else 'OFF'}")
@@ -688,6 +800,32 @@ while running:
             elif event.ui_element == add_tile_button:
                 add_tile_mode = not add_tile_mode
                 add_tile_button.set_text(f"Add: {'ON' if add_tile_mode else 'OFF'}")
+
+                if add_tile_mode:
+                    # Create the "Move" button if it doesn't exist
+                    if move_tile_button is None:
+                        move_button_width = 100
+                        move_button_height = 40
+                        move_tile_button = pygame_gui.elements.UIButton(
+                            relative_rect=pygame.Rect((0, 0), (move_button_width, move_button_height)),
+                            text="Move",
+                            manager=manager
+                        )
+                        update_move_button_position()
+                else:
+                    # Destroy the "Move" button if it exists
+                    if move_tile_button is not None:
+                        move_tile_button.kill()
+                        move_tile_button = None
+            elif event.ui_element == move_tile_button:
+                move_tile_mode = not move_tile_mode
+                move_tile_button.set_text("Move (ON)" if move_tile_mode else "Move")
+                # Change the button's color when active
+                if move_tile_mode:
+                    move_tile_button.select()
+                else:
+                    move_tile_button.unselect()
+                    tile_system.deselect_tile()  # Deselect any selected tile
             elif event.ui_element == reset_zoom_button:
                 zoom_factor = 1.0  # Reset zoom to default
                 tile_system.reset_map_view()  # Reset map view to follow the player
@@ -793,20 +931,12 @@ while running:
                 tile_window = None
                 tile_window_visible = False
                 tile_window_maximized = False
-            elif event.ui_element == description_popup_window:
-                description_popup_window = None
-                description_text_box = None
 
         manager.process_events(event)
 
-        # Check for clicks on links in the message box
-        if event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
-            link_target = event.link_target
-            handle_link_click(link_target)
-
         # Handle clicks on link areas and right-click on image area
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if 'image_rect' in locals() and image_rect.collidepoint(event.pos):
+            if 'image_rect' in locals() and image_rect and image_rect.collidepoint(event.pos):
                 x, y = event.pos
                 rel_x = (x - image_rect.left) / image_rect.width
                 rel_y = (y - image_rect.top) / image_rect.height
@@ -902,50 +1032,10 @@ while running:
                                         )
                                 else:
                                     messagebox.showwarning("Folder Link", "No valid folder link found for this area.")
+                                    bring_window_to_front()
                             else:
                                 messagebox.showwarning("No Link Assigned", "No link or JSON assigned to this area.")
-                        elif event.button == 3 and not (assign_link_folder_mode or assign_json_area_mode):  # Right-click
-                            # Open context menu or handle right-click if needed
-                            pass
-                else:
-                    if event.button == 3:  # Right-click on image area
-                        # Create the description popup window at the mouse position
-                        if description_popup_window is None:
-                            window_width = 200  # Adjust as needed
-                            window_height = window_width * 3  # 3:1 ratio
-                            x, y = event.pos
-                            # Ensure the window doesn't go off-screen
-                            if x + window_width > screen_width:
-                                x = screen_width - window_width
-                            if y + window_height > screen_height:
-                                y = screen_height - window_height
-                            description_popup_window = pygame_gui.elements.UIWindow(
-                                rect=pygame.Rect((x, y), (window_width, window_height)),
-                                manager=manager,
-                                window_display_title="Description",
-                                object_id="#description_popup"
-                            )
-                            # Create a UITextBox inside the window
-                            if image_viewing_mode:
-                                # For image viewing mode, you might store descriptions differently
-                                # For this example, we'll just display a placeholder
-                                text_content = "Image Description"
-                            else:
-                                current_tile = tile_system.get_current_tile()
-                                if current_tile:
-                                    text_content = current_tile.text_content
-                                else:
-                                    text_content = "No tile description."
-                            description_text_box = pygame_gui.elements.UITextBox(
-                                html_text=f"<font color='#000000'>{text_content}</font>",
-                                relative_rect=pygame.Rect((0, 0), (window_width - 20, window_height - 20)),
-                                manager=manager,
-                                container=description_popup_window,
-                                object_id="#description_text_box"
-                            )
-                            description_text_box.background_colour = pygame.Color("#FFFFFF")
-                            description_text_box.text_colour = pygame.Color("#000000")
-                            description_text_box.rebuild()
+                                bring_window_to_front()
 
     # Revert the button text after the duration has passed
     if confirmation_button and pygame.time.get_ticks() > confirmation_end_time:
@@ -964,74 +1054,62 @@ while running:
         if image_viewing_images:
             image_path = image_viewing_images[image_viewing_index]
             current_image = load_image(image_path)
-            if current_image is not None:
-                img_height, img_width = current_image.shape[:2]
+            image_rect = display_image(current_image)
+            if image_rect is None:
+                # Image could not be loaded, use default image
+                current_image = default_image_cv2
+                image_rect = display_image(current_image)
+        else:
+            # No images to display, use default image
+            current_image = default_image_cv2
+            image_rect = display_image(current_image)
 
-                display_width, display_height = image_display_area.width, image_display_area.height
+        # Draw link areas if show_link_areas is True
+        if show_link_areas:
+            link_areas = image_viewing_link_areas.get(image_path, [])
+            for area in link_areas:
+                rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
+                x0 = image_rect.left + rel_x0 * image_rect.width
+                y0 = image_rect.top + rel_y0 * image_rect.height
+                x1 = image_rect.left + rel_x1 * image_rect.width
+                y1 = image_rect.top + rel_y1 * image_rect.height
+                rect = pygame.Rect(x0, y0, x1 - x0, y1 - y0)
+                pygame.draw.rect(screen, (255, 0, 0), rect, 2)  # Red rectangle
 
-                # Calculate scale factors and new dimensions
-                scale_factor = min(display_width / img_width, display_height / img_height)
-                new_width = int(img_width * scale_factor)
-                new_height = int(img_height * scale_factor)
-
-                scaled_image = cv2.resize(current_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-                scaled_image_pygame = cv2_to_pygame(scaled_image)
-                image_rect = scaled_image_pygame.get_rect(center=image_display_area.center)
-
-                screen.blit(scaled_image_pygame, image_rect.topleft)
-
-                # Draw link areas if show_link_areas is True
-                if show_link_areas:
-                    link_areas = image_viewing_link_areas.get(image_path, [])
-                    for area in link_areas:
-                        rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
-                        x0 = image_rect.left + rel_x0 * image_rect.width
-                        y0 = image_rect.top + rel_y0 * image_rect.height
-                        x1 = image_rect.left + rel_x1 * image_rect.width
-                        y1 = image_rect.top + rel_y1 * image_rect.height
-                        rect = pygame.Rect(x0, y0, x1 - x0, y1 - y0)
-                        pygame.draw.rect(screen, (255, 0, 0), rect, 2)  # Red rectangle
-
-                # Draw the rectangle being drawn
-                if drawing_link_area and link_area_rect is not None:
-                    pygame.draw.rect(screen, (0, 255, 0), link_area_rect, 1)  # Green rectangle
+        # Draw the rectangle being drawn
+        if drawing_link_area and link_area_rect is not None:
+            pygame.draw.rect(screen, (0, 255, 0), link_area_rect, 1)  # Green rectangle
     else:
         # Display the selected image if the current tile has images
         current_tile = tile_system.get_current_tile()
         if current_tile and current_tile.image_filenames:
             current_image = current_tile.get_current_image(tile_system.current_image_index)
-            if current_image is not None:
-                img_height, img_width = current_image.shape[:2]
+            image_rect = display_image(current_image)
+            if image_rect is None:
+                # Image could not be loaded, use default image
+                current_image = default_image_cv2
+                image_rect = display_image(current_image)
+        else:
+            # No images to display, use default image
+            current_image = default_image_cv2
+            image_rect = display_image(current_image)
 
-                display_width, display_height = image_display_area.width, image_display_area.height
+        # Draw link areas if show_link_areas is True
+        image_index = tile_system.current_image_index
+        link_areas = current_tile.link_areas.get(image_index, []) if current_tile else []
+        if show_link_areas:
+            for area in link_areas:
+                rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
+                x0 = image_rect.left + rel_x0 * image_rect.width
+                y0 = image_rect.top + rel_y0 * image_rect.height
+                x1 = image_rect.left + rel_x1 * image_rect.width
+                y1 = image_rect.top + rel_y1 * image_rect.height
+                rect = pygame.Rect(x0, y0, x1 - x0, y1 - y0)
+                pygame.draw.rect(screen, (255, 0, 0), rect, 2)  # Red rectangle
 
-                # Calculate scale factors and new dimensions
-                scale_factor = min(display_width / img_width, display_height / img_height)
-                new_width = int(img_width * scale_factor)
-                new_height = int(img_height * scale_factor)
-
-                scaled_image = cv2.resize(current_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-                scaled_image_pygame = cv2_to_pygame(scaled_image)
-                image_rect = scaled_image_pygame.get_rect(center=image_display_area.center)
-
-                screen.blit(scaled_image_pygame, image_rect.topleft)
-
-                # Draw link areas if show_link_areas is True
-                image_index = tile_system.current_image_index
-                link_areas = current_tile.link_areas.get(image_index, [])
-                if show_link_areas:
-                    for area in link_areas:
-                        rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
-                        x0 = image_rect.left + rel_x0 * image_rect.width
-                        y0 = image_rect.top + rel_y0 * image_rect.height
-                        x1 = image_rect.left + rel_x1 * image_rect.width
-                        y1 = image_rect.top + rel_y1 * image_rect.height
-                        rect = pygame.Rect(x0, y0, x1 - x0, y1 - y0)
-                        pygame.draw.rect(screen, (255, 0, 0), rect, 2)  # Red rectangle
-
-                # Draw the rectangle being drawn
-                if drawing_link_area and link_area_rect is not None:
-                    pygame.draw.rect(screen, (0, 255, 0), link_area_rect, 1)  # Green rectangle
+        # Draw the rectangle being drawn
+        if drawing_link_area and link_area_rect is not None:
+            pygame.draw.rect(screen, (0, 255, 0), link_area_rect, 1)  # Green rectangle
 
     # Update the tile image if the tile window is visible and not in image viewing mode
     if tile_window is not None and not image_viewing_mode:
