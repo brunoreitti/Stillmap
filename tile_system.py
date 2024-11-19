@@ -55,6 +55,9 @@ background_image_path = None  # Path to the background image file
 # Map view offset for panning
 map_offset = [0, 0]  # [offset_x, offset_y]
 
+# Variable to store the selected tile
+selected_tile = None  # Variable to store the selected tile
+
 # Tile class definition
 class Tile:
     def __init__(self, row, col):
@@ -68,9 +71,9 @@ class Tile:
         self.directory = None
         self.image_filenames = []
         self.json_file = None  # Associated JSON file
-        self.text_content = ""  # Text content
         self.folder_link = None  # Folder link
         self.link_areas = {}  # Dictionary with image_index as key
+        self.selected = False  # New attribute for selection
 
     # Methods for the Tile class
     def draw(self, surface, offset_x, offset_y, zoom_factor):
@@ -88,6 +91,12 @@ class Tile:
         else:
             # Draw grid lines in black
             pygame.draw.rect(surface, BLACK, adjusted_rect, 1)
+
+        # Draw selection overlay if selected
+        if self.selected:
+            overlay_surface = pygame.Surface((int(adjusted_rect.width), int(adjusted_rect.height)), pygame.SRCALPHA)
+            overlay_surface.fill((0, 0, 255, 100))  # Blue with alpha
+            surface.blit(overlay_surface, adjusted_rect.topleft)
 
     def toggle_active(self):
         self.active = not self.active
@@ -162,6 +171,14 @@ def create_tile(row, col):
         print(f"Created tile at position ({row}, {col})")
     else:
         print(f"Tile at position ({row}, {col}) already exists.")
+
+def delete_tile(row, col):
+    key = (row, col)
+    if key in tiles:
+        del tiles[key]
+        print(f"Deleted tile at ({row}, {col})")
+    else:
+        print(f"No tile at ({row}, {col}) to delete")
 
 def get_current_tile():
     return get_tile(player_pos[0], player_pos[1])
@@ -366,15 +383,6 @@ def toggle_clear_json_link_mode():
     clear_json_link_mode = not clear_json_link_mode
     json_link_mode = False
 
-def edit_text():
-    current_tile = get_current_tile()
-    if current_tile:
-        new_text = simpledialog.askstring("Edit Description", "Enter new text:", initialvalue=current_tile.text_content)
-        if new_text is not None:
-            current_tile.text_content = new_text
-    else:
-        messagebox.showwarning("No Tile", "No tile exists at the player's current position.")
-
 def remove_current_tile_folder():
     current_tile = get_current_tile()
     if current_tile:
@@ -401,6 +409,55 @@ def reset_map_view():
     global map_offset
     map_offset = [0, 0]
     print("Map view reset to follow the player.")
+
+def select_tile(row, col):
+    global selected_tile
+    tile = get_tile(row, col)
+    if tile is not None:
+        # Deselect previous selected tile
+        if selected_tile is not None:
+            prev_row, prev_col = selected_tile
+            prev_tile = get_tile(prev_row, prev_col)
+            if prev_tile is not None:
+                prev_tile.selected = False
+        # Select new tile
+        tile.selected = True
+        selected_tile = (row, col)
+        print(f"Selected tile at ({row}, {col})")
+    else:
+        print(f"No tile at ({row}, {col}) to select")
+
+def deselect_tile():
+    global selected_tile
+    if selected_tile is not None:
+        row, col = selected_tile
+        tile = get_tile(row, col)
+        if tile is not None:
+            tile.selected = False
+        selected_tile = None
+
+def move_selected_tile_to(row, col):
+    global selected_tile, tiles
+    if selected_tile is not None:
+        src_row, src_col = selected_tile
+        src_tile = get_tile(src_row, src_col)
+        if src_tile is not None:
+            dest_tile = get_tile(row, col)
+            if dest_tile is None:
+                # Move the tile
+                tiles[(row, col)] = src_tile
+                del tiles[(src_row, src_col)]
+                src_tile.row = row
+                src_tile.col = col
+                src_tile.selected = False
+                selected_tile = None
+                print(f"Moved tile from ({src_row}, {src_col}) to ({row}, {col})")
+            else:
+                print(f"Cannot move tile to ({row}, {col}): Tile already exists")
+        else:
+            print("Selected tile does not exist")
+    else:
+        print("No tile selected to move")
 
 # Functions to save and load the game state
 def save_game_state():
@@ -481,7 +538,6 @@ def serialize_game_state():
             "directory": tile.directory,
             "image_filenames": tile.image_filenames,
             "json_file": tile.json_file,
-            "text_content": tile.text_content,  # Include text content in the save
             "folder_link": tile.folder_link,  # Include folder link in the save
             "link_areas": link_areas_serializable  # Save link areas
         }
@@ -489,7 +545,7 @@ def serialize_game_state():
     return game_state
 
 def load_game_state_from_dict(game_state):
-    global player_pos, player_direction, tiles, current_image_index, background_image, background_image_path, grid_visible, map_offset
+    global player_pos, player_direction, tiles, current_image_index, background_image, background_image_path, grid_visible, map_offset, selected_tile
 
     try:
         player_pos[:] = game_state["player_position"]
@@ -499,6 +555,7 @@ def load_game_state_from_dict(game_state):
 
         # Clear the current game state
         tiles.clear()
+        selected_tile = None  # Clear selected tile
 
         for tile_data in game_state["tiles"]:
             row = tile_data["row"]
@@ -507,7 +564,6 @@ def load_game_state_from_dict(game_state):
             tile.active = tile_data.get("active", True)
             tile.set_directory(tile_data.get("directory"))
             tile.json_file = tile_data.get("json_file")
-            tile.text_content = tile_data.get("text_content", "")
             tile.folder_link = tile_data.get("folder_link", None)
             link_areas = tile_data.get("link_areas", {})
             # Convert image_index keys back to integers
@@ -577,7 +633,7 @@ def go_forward():
 __all__ = [
     'Tile', 'initialize', 'get_tile', 'get_current_tile', 'draw_board', 'draw_player',
     'move_player', 'rotate_player', 'toggle_edit_mode', 'toggle_json_link_mode',
-    'toggle_clear_json_link_mode', 'edit_text', 'remove_current_tile_folder',
+    'toggle_clear_json_link_mode', 'remove_current_tile_folder',
     'player_pos', 'player_direction', 'edit_mode', 'json_link_mode',
     'clear_json_link_mode', 'current_image_index', 'current_loaded_file',
     'save_directory', 'clear_current_tile_json_link',
@@ -585,5 +641,7 @@ __all__ = [
     'save_current_state_to_history', 'go_back', 'go_forward',
     'bring_window_to_front', 'load_image', 'SQUARE_SIZE', 'set_background_image',
     'cv2_to_pygame', 'grid_visible', 'draw_ghost_tile', 'create_tile',
-    'map_offset', 'reset_map_view', 'move_player_to_tile'  # Added move_player_to_tile to exports
+    'map_offset', 'reset_map_view', 'move_player_to_tile',
+    'select_tile', 'deselect_tile', 'move_selected_tile_to',
+    'delete_tile',  # Include delete_tile in the list
 ]
