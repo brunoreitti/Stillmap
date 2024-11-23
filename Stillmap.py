@@ -102,7 +102,7 @@ def load_svg_image(svg_path, output_width=None, output_height=None):
 # Now, you can call load_image and cv2_to_pygame
 
 # Load the default image (can be PNG, PDF, or SVG)
-DEFAULT_IMAGE_PATH = 'earthscanlogo3.svg'  # Replace with your default image path
+DEFAULT_IMAGE_PATH = 'craybg2.svg'  # Replace with your default image path
 default_image_cv2 = load_image(DEFAULT_IMAGE_PATH)
 if default_image_cv2 is not None:
     pass  # The image is loaded into default_image_cv2
@@ -256,6 +256,7 @@ for i, text in enumerate(button_texts):
  assign_json_area_button, show_links_button) = buttons
 
 # Adjust tile window size to match the original size
+SQUARE_SIZE = tile_system.SQUARE_SIZE  # Ensure consistency
 tile_window_width = SQUARE_SIZE * 9  # Original width (e.g., 324 pixels)
 tile_window_height = SQUARE_SIZE * 9  # Original height (e.g., 324 pixels)
 tile_window_bottom_bar_height = 60  # Height of the bottom bar in the tile window
@@ -268,13 +269,33 @@ tile_window = pygame_gui.elements.UIWindow(
     object_id="#tile_window"
 )
 
-# Create a UIImage inside the tile window to display the tiles
-tile_image_surface = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
+# Width for the left panel
+tile_window_left_panel_width = 50
+
+# Create the left panel
+tile_window_left_panel = pygame_gui.elements.UIPanel(
+    relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, tile_window_height)),
+    manager=manager,
+    container=tile_window,
+    object_id="#tile_window_left_panel"
+)
+
+# Adjust the tile image to start after the left panel
+tile_image_width = tile_window_width - tile_window_left_panel_width
+tile_image_surface = pygame.Surface((tile_image_width, tile_window_height), pygame.SRCALPHA)
 tile_image = pygame_gui.elements.UIImage(
-    relative_rect=pygame.Rect((0, 0), (tile_window_width -2, tile_window_height)),
+    relative_rect=pygame.Rect((tile_window_left_panel_width, 0), (tile_image_width, tile_window_height)),
     image_surface=tile_image_surface,
     manager=manager,
     container=tile_window
+)
+
+# Create the "Sub" button
+sub_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, 50)),
+    text=f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}",
+    manager=manager,
+    container=tile_window_left_panel
 )
 
 # Create a bottom bar inside the tile window
@@ -397,6 +418,9 @@ last_click_pos = None
 move_tile_button = None  # Variable to store the "Move" button
 move_tile_mode = False  # Flag to track if move mode is active
 
+# Variable to track if the map is following the player
+follow_player = True  # Map view is following the player by default
+
 # Main game loop
 running = True
 confirmation_button = None  # To store the current confirmation button
@@ -411,30 +435,9 @@ def update_move_button_position():
         move_button_width = 100
         move_button_height = 40
 
-        # Get the tile_image_rect
-        tile_image_rect = tile_image.get_abs_rect()
-
-        # Get the player's position
-        player_row, player_col = tile_system.player_pos[0], tile_system.player_pos[1]
-
-        # Calculate the scaled size of the tiles
-        scaled_size = SQUARE_SIZE * zoom_factor
-
-        # Calculate offset_x and offset_y
-        offset_x = tile_image_rect.width // 2 - player_col * scaled_size
-        offset_y = tile_image_rect.height // 2 - player_row * scaled_size
-
-        # Desired position relative to the player's position
-        desired_tile_col = player_col + 5  # Adjust as needed
-        desired_tile_row = player_row  # Adjust as needed
-
-        # Calculate the position
-        tile_pos_x = desired_tile_col * scaled_size + offset_x + tile_system.map_offset[0]
-        tile_pos_y = desired_tile_row * scaled_size + offset_y + tile_system.map_offset[1]
-
-        # Calculate the absolute position on the screen
-        move_button_x = tile_image_rect.left + tile_pos_x
-        move_button_y = tile_image_rect.top + tile_pos_y
+        # Desired position relative to the tile window
+        move_button_x = tile_window.get_abs_rect().left + tile_window.get_abs_rect().width - move_button_width - 10
+        move_button_y = tile_window.get_abs_rect().top + 10
 
         move_tile_button.set_relative_position((move_button_x, move_button_y))
 
@@ -461,18 +464,36 @@ def display_image(current_image):
     else:
         return None
 
-# Rest of your event handling code and main game loop continues here...
-# Make sure to include all your existing event handling and game loop code.
+# Function to reset map view to center on the player
+def reset_map_view():
+    global follow_player
+    scaled_square_size = SQUARE_SIZE * zoom_factor
+    tile_image_rect = tile_image.get_abs_rect()
+    tile_system.map_offset[0] = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
+    tile_system.map_offset[1] = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
+    print("Map view reset to follow the player.")
 
-# Note: Since the rest of your code remains the same, you can continue using your existing code for the event loop, input handling, and drawing routines.
+# Function to adjust map_offset when zooming to keep the center point fixed
+def adjust_zoom(old_zoom, new_zoom):
+    if follow_player:
+        # When following the player, no need to adjust map_offset
+        pass
+    else:
+        # Adjust map_offset to keep the center point stationary
+        # Use the center of the tile_image as the reference point
+        tile_image_rect = tile_image.get_abs_rect()
+        center_x = tile_image_rect.width / 2
+        center_y = tile_image_rect.height / 2
 
+        # Calculate the position in the map before zooming
+        map_x_before = (center_x - tile_system.map_offset[0]) / (SQUARE_SIZE * old_zoom)
+        map_y_before = (center_y - tile_system.map_offset[1]) / (SQUARE_SIZE * old_zoom)
 
+        # Calculate the new map_offset to keep the center point stationary
+        tile_system.map_offset[0] = center_x - map_x_before * SQUARE_SIZE * new_zoom
+        tile_system.map_offset[1] = center_y - map_y_before * SQUARE_SIZE * new_zoom
 
-# (Rest of your event handling code and main game loop remains unchanged)
-
-# Please make sure to replace the `(Rest of your event handling code and main game loop remains unchanged)` with your actual event handling code and main game loop.
-
-
+# Main game loop
 while running:
     time_delta = clock.tick(60) / 1000.0  # Limits the frame rate to 60 FPS
     screen.fill(MAIN_BG_COLOR)  # Fill the main area with the main background color
@@ -499,11 +520,17 @@ while running:
                     image_display_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
                     tile_window.set_relative_position((image_display_area.left, image_display_area.top))
                     tile_window.set_dimensions((image_display_area.width, image_display_area.height))
-                    tile_image.set_dimensions((image_display_area.width, image_display_area.height - tile_window_bottom_bar_height))
-                    tile_image.set_relative_position((0, 0))
+
+                    tile_image_width = image_display_area.width - tile_window_left_panel_width
+                    tile_image_height = image_display_area.height - tile_window_bottom_bar_height
+
+                    tile_image.set_dimensions((tile_image_width, tile_image_height))
+                    tile_image.set_relative_position((tile_window_left_panel_width, 0))
+                    tile_window_left_panel.set_dimensions((tile_window_left_panel_width, image_display_area.height - tile_window_bottom_bar_height))
+
                     tile_window_bottom_bar.set_relative_position((0, image_display_area.height - tile_window_bottom_bar_height))
                     tile_window_bottom_bar.set_dimensions((image_display_area.width, tile_window_bottom_bar_height))
-                    tile_image_surface = pygame.Surface((image_display_area.width, image_display_area.height - tile_window_bottom_bar_height), pygame.SRCALPHA)
+                    tile_image_surface = pygame.Surface((tile_image_width, tile_image_height), pygame.SRCALPHA)
                     tile_image.set_image(tile_image_surface)
                 else:
                     tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
@@ -549,9 +576,13 @@ while running:
                     tile_system.rotate_player(event.key)
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 4:  # Mouse wheel up
+                old_zoom = zoom_factor
                 zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
+                adjust_zoom(old_zoom, zoom_factor)
             elif event.button == 5:  # Mouse wheel down
+                old_zoom = zoom_factor
                 zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
+                adjust_zoom(old_zoom, zoom_factor)
             elif event.button == 8:  # Backward mouse button
                 tile_system.go_back()
                 bring_window_to_front()
@@ -572,10 +603,14 @@ while running:
                     if tile_image_rect.collidepoint(event.pos):
                         local_pos = (event.pos[0] - tile_image_rect.left, event.pos[1] - tile_image_rect.top)
                         scaled_square_size = SQUARE_SIZE * zoom_factor
-                        offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
-                        offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
-                        tile_col = int((local_pos[0] - offset_x - tile_system.map_offset[0]) // scaled_square_size)
-                        tile_row = int((local_pos[1] - offset_y - tile_system.map_offset[1]) // scaled_square_size)
+                        if follow_player:
+                            offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
+                            offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
+                        else:
+                            offset_x = tile_system.map_offset[0]
+                            offset_y = tile_system.map_offset[1]
+                        tile_col = int((local_pos[0] - offset_x) // scaled_square_size)
+                        tile_row = int((local_pos[1] - offset_y) // scaled_square_size)
 
                         if event.button == 1:
                             if add_tile_mode:
@@ -617,6 +652,9 @@ while running:
                                         tile_system.move_player_to_tile(tile_row, tile_col)
                                         # Reset last_click_time to prevent triple-click
                                         last_click_time = 0
+                                        # If following player, reset map view
+                                        if follow_player:
+                                            reset_map_view()
                                     else:
                                         # Not close enough; treat as first click
                                         last_click_time = current_time
@@ -628,6 +666,7 @@ while running:
                                     # Start panning
                                     panning = True
                                     pan_start_pos = event.pos
+                                    follow_player = False  # User has manually panned the map
                         elif event.button == 3:
                             # Right-click actions when add_tile_mode is off
                             if not add_tile_mode:
@@ -658,6 +697,7 @@ while running:
                         # Start panning
                         panning = True
                         pan_start_pos = event.pos
+                        follow_player = False  # User has manually panned the map
         elif event.type == pygame.MOUSEBUTTONUP:
             if drawing_link_area and event.button == 1:
                 drawing_link_area = False
@@ -828,31 +868,44 @@ while running:
                     tile_system.deselect_tile()  # Deselect any selected tile
             elif event.ui_element == reset_zoom_button:
                 zoom_factor = 1.0  # Reset zoom to default
-                tile_system.reset_map_view()  # Reset map view to follow the player
+                reset_map_view()  # Reset map view to follow the player
+                follow_player = True  # Map view is now following the player
             elif event.ui_element == maximize_button:
                 tile_window_maximized = not tile_window_maximized
                 if tile_window_maximized:
-                    # Maximize the tile window to the image display area
+                    # Maximize the tile window
                     maximize_button.set_text("Restore")
                     image_display_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
                     tile_window.set_relative_position((image_display_area.left, image_display_area.top))
                     tile_window.set_dimensions((image_display_area.width, image_display_area.height))
-                    tile_image.set_dimensions((image_display_area.width, image_display_area.height - tile_window_bottom_bar_height))
-                    tile_image.set_relative_position((0, 0))
+
+                    tile_image_width = image_display_area.width - tile_window_left_panel_width
+                    tile_image_height = image_display_area.height - tile_window_bottom_bar_height
+
+                    tile_image.set_dimensions((tile_image_width, tile_image_height))
+                    tile_image.set_relative_position((tile_window_left_panel_width, 0))
+                    tile_window_left_panel.set_dimensions((tile_window_left_panel_width, image_display_area.height - tile_window_bottom_bar_height))
+
                     tile_window_bottom_bar.set_relative_position((0, image_display_area.height - tile_window_bottom_bar_height))
                     tile_window_bottom_bar.set_dimensions((image_display_area.width, tile_window_bottom_bar_height))
-                    tile_image_surface = pygame.Surface((image_display_area.width, image_display_area.height - tile_window_bottom_bar_height), pygame.SRCALPHA)
+                    tile_image_surface = pygame.Surface((tile_image_width, tile_image_height), pygame.SRCALPHA)
                     tile_image.set_image(tile_image_surface)
                 else:
-                    # Restore the tile window to its original size and position
+                    # Restore the tile window
                     maximize_button.set_text("Maximize")
                     tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
                     tile_window.set_dimensions((tile_window_width, tile_window_height + tile_window_bottom_bar_height))
-                    tile_image.set_dimensions((tile_window_width, tile_window_height))
-                    tile_image.set_relative_position((0, 0))
+
+                    tile_image_width = tile_window_width - tile_window_left_panel_width
+                    tile_image_height = tile_window_height
+
+                    tile_image.set_dimensions((tile_image_width, tile_image_height))
+                    tile_image.set_relative_position((tile_window_left_panel_width, 0))
+                    tile_window_left_panel.set_dimensions((tile_window_left_panel_width, tile_window_height))
+
                     tile_window_bottom_bar.set_relative_position((0, tile_window_height))
                     tile_window_bottom_bar.set_dimensions((tile_window_width, tile_window_bottom_bar_height))
-                    tile_image_surface = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
+                    tile_image_surface = pygame.Surface((tile_image_width, tile_image_height), pygame.SRCALPHA)
                     tile_image.set_image(tile_image_surface)
             elif event.ui_element == set_bg_button:
                 # Open file dialog to select background image
@@ -872,14 +925,34 @@ while running:
                         window_display_title="Tile System",
                         object_id="#tile_window"
                     )
-                    # Recreate the tile_image inside the tile window
-                    tile_image_surface = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
+
+                    # Create the left panel
+                    tile_window_left_panel = pygame_gui.elements.UIPanel(
+                        relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, tile_window_height)),
+                        manager=manager,
+                        container=tile_window,
+                        object_id="#tile_window_left_panel"
+                    )
+
+                    # Adjust the tile image
+                    tile_image_width = tile_window_width - tile_window_left_panel_width
+                    tile_image_height = tile_window_height
+                    tile_image_surface = pygame.Surface((tile_image_width, tile_image_height), pygame.SRCALPHA)
                     tile_image = pygame_gui.elements.UIImage(
-                        relative_rect=pygame.Rect((0, 0), (tile_window_width, tile_window_height)),
+                        relative_rect=pygame.Rect((tile_window_left_panel_width, 0), (tile_image_width, tile_image_height)),
                         image_surface=tile_image_surface,
                         manager=manager,
                         container=tile_window
                     )
+
+                    # Create the "Sub" button
+                    sub_button = pygame_gui.elements.UIButton(
+                        relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, 50)),
+                        text=f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}",
+                        manager=manager,
+                        container=tile_window_left_panel
+                    )
+
                     # Recreate the bottom bar
                     tile_window_bottom_bar = pygame_gui.elements.UIPanel(
                         relative_rect=pygame.Rect((0, tile_window_height), (tile_window_width, tile_window_bottom_bar_height)),
@@ -913,6 +986,9 @@ while running:
                         container=tile_window_bottom_bar
                     )
                     tile_window_visible = True
+            elif event.ui_element == sub_button:
+                tile_system.sub_grid_visible = not tile_system.sub_grid_visible
+                sub_button.set_text(f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}")
             elif event.ui_element == get_back_button:
                 # Save link areas before exiting image viewing mode
                 save_image_viewing_link_areas()
@@ -1119,17 +1195,23 @@ while running:
         local_mouse_pos = (local_mouse_pos[0] - tile_image_rect.left, local_mouse_pos[1] - tile_image_rect.top)
         # Calculate visible area
         visible_area = pygame.Rect(0, 0, tile_image_rect.width, tile_image_rect.height)
-        # Draw the board centered on the player
+        # Draw the board
         scaled_square_size = SQUARE_SIZE * zoom_factor
-        offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
-        offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
+        if follow_player:
+            # Map is following the player
+            offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
+            offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
+        else:
+            # Map is not following the player
+            offset_x = tile_system.map_offset[0]
+            offset_y = tile_system.map_offset[1]
         tile_system.draw_board(local_mouse_pos, offset_x, offset_y, tile_image.image, visible_area, zoom_factor)
         tile_system.draw_player(offset_x, offset_y, tile_image.image, zoom_factor)
         # Draw the ghost tile if in add_tile_mode
         if add_tile_mode:
             # Calculate tile position under the mouse
-            tile_col = int((local_mouse_pos[0] - offset_x - tile_system.map_offset[0]) // scaled_square_size)
-            tile_row = int((local_mouse_pos[1] - offset_y - tile_system.map_offset[1]) // scaled_square_size)
+            tile_col = int((local_mouse_pos[0] - offset_x) // scaled_square_size)
+            tile_row = int((local_mouse_pos[1] - offset_y) // scaled_square_size)
             tile_system.draw_ghost_tile(tile_row, tile_col, offset_x, offset_y, tile_image.image, zoom_factor)
         tile_image_surface.blit(tile_image.image, (0, 0))  # Update the UIImage's surface
 
