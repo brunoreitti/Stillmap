@@ -40,10 +40,21 @@ load_image = None
 cv2_to_pygame = None
 SQUARE_SIZE = 36  # Default value; should be set from main.py
 
-def initialize():
-    global save_directory
-    if not os.path.exists(save_directory):
-        os.makedirs(save_directory)
+vector_lines = []  # List to store vector lines
+
+class VectorLine:
+    def __init__(self, start_tile, start_subgrid_pos, end_tile=None, end_subgrid_pos=None):
+        self.start_tile = start_tile
+        self.start_subgrid_pos = start_subgrid_pos  # (row, col) within the subgrid
+        self.end_tile = end_tile
+        self.end_subgrid_pos = end_subgrid_pos
+        self.is_complete = end_tile is not None
+
+def find_vector_with_end_point(tile, subgrid_pos):
+    for vector in vector_lines:
+        if vector.end_tile == tile and vector.end_subgrid_pos == subgrid_pos:
+            return vector
+    return None
 
 class Tile:
     def __init__(self, row, col):
@@ -56,6 +67,10 @@ class Tile:
         self.folder_link = None  # Link to another folder
         self.selected = False  # For moving tiles
         self.link_areas = {}  # Key: image index, Value: list of link areas
+        self.subgrid_occupied = [[False]*3 for _ in range(3)]  # 3x3 grid of booleans
+
+        # Make center subgrid square occupied (inactive)
+        self.subgrid_occupied[1][1] = True  # Center square is occupied
 
     def set_directory(self, directory):
         self.directory = directory
@@ -85,6 +100,21 @@ class Tile:
         self.active = not self.active
         print(f"Tile at ({self.row}, {self.col}) is now {'active' if self.active else 'inactive'}")
 
+    def is_subgrid_square_free(self, sub_row, sub_col):
+        return not self.subgrid_occupied[sub_row][sub_col]
+
+    def set_subgrid_square_occupied(self, sub_row, sub_col, occupied=True):
+        self.subgrid_occupied[sub_row][sub_col] = occupied
+
+    def get_subgrid_square_center(self, sub_row, sub_col, offset_x, offset_y, zoom_factor):
+        scaled_size = SQUARE_SIZE * zoom_factor
+        tile_pos_x = self.col * scaled_size + offset_x
+        tile_pos_y = self.row * scaled_size + offset_y
+        sub_square_size = scaled_size / 3
+        center_x = tile_pos_x + sub_col * sub_square_size + sub_square_size / 2
+        center_y = tile_pos_y + sub_row * sub_square_size + sub_square_size / 2
+        return center_x, center_y
+
     def draw(self, surface, offset_x, offset_y, zoom_factor, mouse_pos):
         scaled_size = SQUARE_SIZE * zoom_factor
         tile_pos_x = self.col * scaled_size + offset_x
@@ -111,6 +141,22 @@ class Tile:
                 end_pos = (adjusted_rect.left + j * sub_square_size, adjusted_rect.bottom)
                 pygame.draw.line(surface, color, start_pos, end_pos, 1)
 
+            # Highlight occupied subgrid squares
+            for sub_row in range(3):
+                for sub_col in range(3):
+                    if self.subgrid_occupied[sub_row][sub_col]:
+                        sub_rect = pygame.Rect(
+                            adjusted_rect.left + sub_col * sub_square_size,
+                            adjusted_rect.top + sub_row * sub_square_size,
+                            sub_square_size,
+                            sub_square_size
+                        )
+                        if sub_row == 1 and sub_col == 1:
+                            # Center square: inactive (gray)
+                            pygame.draw.rect(surface, (128, 128, 128), sub_rect)
+                        else:
+                            pygame.draw.rect(surface, BLUE, sub_rect)
+
             # Highlight sub-square if mouse is over it
             if adjusted_rect.collidepoint(mouse_pos):
                 mouse_x, mouse_y = mouse_pos
@@ -118,13 +164,15 @@ class Tile:
                 rel_y = mouse_y - adjusted_rect.top
                 sub_col = int(rel_x // sub_square_size)
                 sub_row = int(rel_y // sub_square_size)
-                sub_rect = pygame.Rect(
-                    adjusted_rect.left + sub_col * sub_square_size,
-                    adjusted_rect.top + sub_row * sub_square_size,
-                    sub_square_size,
-                    sub_square_size
-                )
-                pygame.draw.rect(surface, BLUE, sub_rect)
+                if 0 <= sub_row < 3 and 0 <= sub_col < 3:
+                    if not self.subgrid_occupied[sub_row][sub_col]:
+                        sub_rect = pygame.Rect(
+                            adjusted_rect.left + sub_col * sub_square_size,
+                            adjusted_rect.top + sub_row * sub_square_size,
+                            sub_square_size,
+                            sub_square_size
+                        )
+                        pygame.draw.rect(surface, (0, 255, 0), sub_rect, 2)  # Green border for hover
 
         if self.selected:
             # Draw selection highlight
@@ -149,6 +197,11 @@ class Tile:
         self.link_areas[image_index].append(area)
         print(f"Added link area to tile at ({self.row}, {self.col}), image index {image_index}")
 
+def initialize():
+    global save_directory
+    if not os.path.exists(save_directory):
+        os.makedirs(save_directory)
+
 def get_tile(row, col):
     return tiles.get((row, col))
 
@@ -161,6 +214,9 @@ def create_tile(row, col):
 
 def delete_tile(row, col):
     if (row, col) in tiles:
+        # Remove any vector lines involving this tile
+        tile = tiles[(row, col)]
+        vector_lines[:] = [v for v in vector_lines if v.start_tile != tile and v.end_tile != tile]
         del tiles[(row, col)]
         print(f"Deleted tile at ({row}, {col})")
     else:
@@ -469,7 +525,17 @@ def serialize_game_state():
         "tiles": [],
         "background_image_path": background_image_path,  # Save the background image path
         "grid_visible": sub_grid_visible,  # Save the sub-grid visibility state
-        "map_offset": map_offset  # Save the map view offset
+        "map_offset": map_offset,  # Save the map view offset
+        "vector_lines": [
+            {
+                "start_tile": (vector.start_tile.row, vector.start_tile.col),
+                "start_subgrid_pos": vector.start_subgrid_pos,
+                "end_tile": (vector.end_tile.row, vector.end_tile.col) if vector.end_tile else None,
+                "end_subgrid_pos": vector.end_subgrid_pos,
+                "is_complete": vector.is_complete
+            }
+            for vector in vector_lines
+        ]
     }
     for key, tile in tiles.items():
         # Prepare link areas for JSON serialization
@@ -489,7 +555,8 @@ def serialize_game_state():
             "image_filenames": tile.image_filenames,
             "json_file": tile.json_file,
             "folder_link": tile.folder_link,  # Include folder link in the save
-            "link_areas": link_areas_serializable  # Save link areas
+            "link_areas": link_areas_serializable,  # Save link areas
+            "subgrid_occupied": tile.subgrid_occupied  # Save subgrid occupied state
         }
         game_state["tiles"].append(tile_data)
     return game_state
@@ -515,6 +582,7 @@ def load_game_state_from_dict(game_state):
             tile.set_directory(tile_data.get("directory"))
             tile.json_file = tile_data.get("json_file")
             tile.folder_link = tile_data.get("folder_link", None)
+            tile.subgrid_occupied = tile_data.get("subgrid_occupied", [[False]*3 for _ in range(3)])
             link_areas = tile_data.get("link_areas", {})
             # Convert image_index keys back to integers
             new_link_areas = {}
@@ -539,6 +607,22 @@ def load_game_state_from_dict(game_state):
                 background_image = None
         else:
             background_image = None
+
+        # Load vector lines
+        vector_lines.clear()
+        for vector_data in game_state.get("vector_lines", []):
+            start_row, start_col = vector_data["start_tile"]
+            start_tile = get_tile(start_row, start_col)
+            start_subgrid_pos = vector_data["start_subgrid_pos"]
+            if vector_data["end_tile"]:
+                end_row, end_col = vector_data["end_tile"]
+                end_tile = get_tile(end_row, end_col)
+            else:
+                end_tile = None
+            end_subgrid_pos = vector_data["end_subgrid_pos"]
+            vector = VectorLine(start_tile, start_subgrid_pos, end_tile, end_subgrid_pos)
+            vector.is_complete = vector_data["is_complete"]
+            vector_lines.append(vector)
 
         current_image_index = 0
         print("Game state loaded from dict.")
@@ -579,6 +663,27 @@ def go_forward():
     else:
         print("No next state in history.")
 
+def get_subgrid_square_at_pixel(x, y, offset_x, offset_y, zoom_factor):
+    scaled_size = SQUARE_SIZE * zoom_factor
+    tile_col = int((x - offset_x) // scaled_size)
+    tile_row = int((y - offset_y) // scaled_size)
+    tile = get_tile(tile_row, tile_col)
+    if tile:
+        rel_x = (x - offset_x) - tile_col * scaled_size
+        rel_y = (y - offset_y) - tile_row * scaled_size
+        sub_square_size = scaled_size / 3
+        sub_col = int(rel_x // sub_square_size)
+        sub_row = int(rel_y // sub_square_size)
+        if 0 <= sub_row < 3 and 0 <= sub_col < 3:
+            # Check if the subgrid square is inactive (center square)
+            if sub_row == 1 and sub_col == 1:
+                return None, None  # Center square is inactive
+            return tile, (sub_row, sub_col)
+        else:
+            return None, None
+    else:
+        return None, None
+
 # Expose necessary variables and functions for import
 __all__ = [
     'Tile', 'initialize', 'get_tile', 'get_current_tile', 'draw_board', 'draw_player',
@@ -593,6 +698,6 @@ __all__ = [
     'cv2_to_pygame', 'draw_ghost_tile', 'create_tile',
     'map_offset', 'reset_map_view', 'move_player_to_tile',
     'select_tile', 'deselect_tile', 'move_selected_tile_to',
-    'delete_tile',  # Include delete_tile in the list
-    'sub_grid_visible',  # Include sub_grid_visible in the list
+    'delete_tile', 'sub_grid_visible',
+    'vector_lines', 'VectorLine', 'find_vector_with_end_point', 'get_subgrid_square_at_pixel',
 ]
