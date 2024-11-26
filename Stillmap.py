@@ -15,6 +15,7 @@ import cairosvg  # For SVG support
 
 # Import the tile_system module
 import tile_system
+from tile_system import vector_lines, VectorLine, find_vector_with_end_point
 
 # Initialize Pygame and Pygame GUI
 pygame.init()
@@ -421,6 +422,10 @@ move_tile_mode = False  # Flag to track if move mode is active
 # Variable to track if the map is following the player
 follow_player = True  # Map view is following the player by default
 
+# Variables for vector drawing
+vector_drawing = False
+current_vector_line = None
+
 # Main game loop
 running = True
 confirmation_button = None  # To store the current confirmation button
@@ -613,7 +618,54 @@ while running:
                         tile_row = int((local_pos[1] - offset_y) // scaled_square_size)
 
                         if event.button == 1:
-                            if add_tile_mode:
+                            # Handle vector drawing when subgrid is visible
+                            if tile_system.sub_grid_visible:
+                                tile, subgrid_pos = tile_system.get_subgrid_square_at_pixel(local_pos[0], local_pos[1], offset_x, offset_y, zoom_factor)
+                                if tile and subgrid_pos:
+                                    sub_row, sub_col = subgrid_pos
+                                    if tile.subgrid_occupied[sub_row][sub_col]:
+                                        current_time = pygame.time.get_ticks()
+                                        if last_click_time and (current_time - last_click_time) < DOUBLE_CLICK_TIME:
+                                            # Double-click detected
+                                            vector = tile_system.find_vector_with_end_point(tile, (sub_row, sub_col))
+                                            if vector:
+                                                # Allow moving the end point
+                                                vector_drawing = True
+                                                current_vector_line = vector
+                                                # Remove the end point so we can move it
+                                                tile.set_subgrid_square_occupied(sub_row, sub_col, False)
+                                                vector.end_tile = None
+                                                vector.end_subgrid_pos = None
+                                                vector.is_complete = False
+                                                last_click_time = 0  # Reset last click time
+                                        else:
+                                            last_click_time = current_time
+                                            last_click_pos = event.pos
+                                    else:
+                                        if not vector_drawing:
+                                            # Start drawing a new vector
+                                            vector_drawing = True
+                                            current_vector_line = tile_system.VectorLine(tile, (sub_row, sub_col))
+                                            tile.set_subgrid_square_occupied(sub_row, sub_col, True)
+                                        else:
+                                            # Enforce that vectors connect different tiles
+                                            if current_vector_line.start_tile != tile:
+                                                # Complete the vector
+                                                current_vector_line.end_tile = tile
+                                                current_vector_line.end_subgrid_pos = (sub_row, sub_col)
+                                                current_vector_line.is_complete = True
+                                                vector_drawing = False
+                                                tile.set_subgrid_square_occupied(sub_row, sub_col, True)
+                                                tile_system.vector_lines.append(current_vector_line)
+                                                current_vector_line = None
+                                            else:
+                                                # Cannot connect to the same tile
+                                                messagebox.showwarning("Invalid Connection", "Cannot create a vector within the same tile.")
+                                                bring_window_to_front()
+                                else:
+                                    # Invalid subgrid square (e.g., center square)
+                                    pass
+                            elif add_tile_mode:
                                 tile = tile_system.get_tile(tile_row, tile_col)
                                 if tile:
                                     if not tile.directory:
@@ -692,12 +744,12 @@ while running:
                                             bring_window_to_front()
                                 else:
                                     print(f"No tile exists at position ({tile_row}, {tile_col}).")
-                if event.button == 1 and not tile_window.get_abs_rect().collidepoint(event.pos):
-                    if not add_tile_mode:
-                        # Start panning
-                        panning = True
-                        pan_start_pos = event.pos
-                        follow_player = False  # User has manually panned the map
+                    if event.button == 1 and not tile_window.get_abs_rect().collidepoint(event.pos):
+                        if not add_tile_mode:
+                            # Start panning
+                            panning = True
+                            pan_start_pos = event.pos
+                            follow_player = False  # User has manually panned the map
         elif event.type == pygame.MOUSEBUTTONUP:
             if drawing_link_area and event.button == 1:
                 drawing_link_area = False
@@ -748,6 +800,8 @@ while running:
                 tile_system.map_offset[0] += dx
                 tile_system.map_offset[1] += dy
                 pan_start_pos = event.pos
+            elif vector_drawing and current_vector_line:
+                pass  # Mouse movement while drawing vector
         elif event.type == pygame_gui.UI_BUTTON_PRESSED:
             if event.ui_element == load_button:
                 tile_system.save_current_state_to_history()
@@ -1213,6 +1267,24 @@ while running:
             tile_col = int((local_mouse_pos[0] - offset_x) // scaled_square_size)
             tile_row = int((local_mouse_pos[1] - offset_y) // scaled_square_size)
             tile_system.draw_ghost_tile(tile_row, tile_col, offset_x, offset_y, tile_image.image, zoom_factor)
+        # Draw vector lines
+        if tile_system.sub_grid_visible:
+            # Draw completed vector lines
+            for vector in tile_system.vector_lines:
+                if vector.is_complete:
+                    start_x, start_y = vector.start_tile.get_subgrid_square_center(
+                        vector.start_subgrid_pos[0], vector.start_subgrid_pos[1], offset_x, offset_y, zoom_factor)
+                    end_x, end_y = vector.end_tile.get_subgrid_square_center(
+                        vector.end_subgrid_pos[0], vector.end_subgrid_pos[1], offset_x, offset_y, zoom_factor)
+                    pygame.draw.line(tile_image.image, (0, 255, 0), (start_x, start_y), (end_x, end_y), 2)
+
+            # Draw the vector line in progress
+            if vector_drawing and current_vector_line:
+                start_x, start_y = current_vector_line.start_tile.get_subgrid_square_center(
+                    current_vector_line.start_subgrid_pos[0], current_vector_line.start_subgrid_pos[1], offset_x, offset_y, zoom_factor)
+                end_x, end_y = local_mouse_pos
+                pygame.draw.line(tile_image.image, (0, 255, 0), (start_x, start_y), (end_x, end_y), 2)
+
         tile_image_surface.blit(tile_image.image, (0, 0))  # Update the UIImage's surface
 
     manager.draw_ui(screen)
