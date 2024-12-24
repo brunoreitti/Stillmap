@@ -12,9 +12,46 @@ import ctypes
 import math
 from pygame import Color
 from tkinter import Tk, filedialog
+import json  # For saving/loading thumbnails_data
 
 pygame.init()
 Tk().withdraw()  # Hide the main Tkinter window
+
+##############################################################################
+# Where we store thumbnail data
+##############################################################################
+THUMBNAILS_SAVE_FILE = "thumbnails_data.json"
+
+def save_thumbnails_data(thumbnails_data):
+    """
+    Saves 'thumbnails_data' to a JSON file.
+    """
+    try:
+        with open(THUMBNAILS_SAVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(thumbnails_data, f, indent=4)
+        print(f"Thumbnails data saved to '{THUMBNAILS_SAVE_FILE}'.")
+    except Exception as e:
+        print(f"Error saving thumbnails data: {e}")
+
+def load_thumbnails_data():
+    """
+    Loads thumbnail data from JSON if it exists. Otherwise returns an empty list.
+    """
+    if not os.path.exists(THUMBNAILS_SAVE_FILE):
+        print("No existing thumbnail data file found. Starting with an empty list.")
+        return []
+    try:
+        with open(THUMBNAILS_SAVE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        print(f"Thumbnails data loaded from '{THUMBNAILS_SAVE_FILE}'.")
+        return data
+    except Exception as e:
+        print(f"Error loading thumbnails data: {e}")
+        return []
+
+##############################################################################
+# SVG and image loading helpers
+##############################################################################
 
 def load_svg_image(svg_path, output_width=None, output_height=None):
     try:
@@ -48,6 +85,9 @@ def load_image(filepath):
             print(f"Failed to load image {filepath}")
             return None
 
+##############################################################################
+# Load background SVG
+##############################################################################
 BACKGROUND_SVG_PATH = 'craybg2.svg'
 background_cv2 = load_svg_image(BACKGROUND_SVG_PATH)
 if background_cv2 is None:
@@ -73,6 +113,9 @@ manager = pygame_gui.UIManager((screen_width, screen_height))
 MAIN_BG_COLOR = (68, 71, 90)
 IMAGE_BG_COLOR = (40, 42, 54)
 
+##############################################################################
+# Bottom bar: now with both "Back to Main" and "Save"
+##############################################################################
 bottom_bar_height = 60
 bottom_bar_panel = pygame_gui.elements.UIPanel(
     relative_rect=pygame.Rect((0, screen_height - bottom_bar_height), (screen_width, bottom_bar_height)),
@@ -80,17 +123,34 @@ bottom_bar_panel = pygame_gui.elements.UIPanel(
     object_id="#bottom_bar"
 )
 
-back_button_width = 120
-back_button_height = 40
-back_button_x = (screen_width - back_button_width) // 2
-back_button_y = (bottom_bar_height - back_button_height) // 2
+button_width = 120
+button_height = 40
+button_spacing = 20
+total_width_for_two = button_width * 2 + button_spacing
+
+back_button_x = (screen_width - total_width_for_two) // 2
+back_button_y = (bottom_bar_height - button_height) // 2
+
 back_to_main_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((back_button_x, back_button_y), (back_button_width, back_button_height)),
+    relative_rect=pygame.Rect((back_button_x, back_button_y), (button_width, button_height)),
     text="Back to Main",
     manager=manager,
     container=bottom_bar_panel
 )
 
+# "Save" button to the right of "Back to Main"
+save_button_x = back_button_x + button_width + button_spacing
+save_button_y = back_button_y
+save_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((save_button_x, save_button_y), (button_width, button_height)),
+    text="Save",
+    manager=manager,
+    container=bottom_bar_panel
+)
+
+##############################################################################
+# Thumbnails display area
+##############################################################################
 image_display_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 80)
 thumbnails_panel = pygame_gui.elements.UIPanel(
     relative_rect=image_display_area,
@@ -122,11 +182,17 @@ next_page_button = None
 last_page_button = None
 page_buttons = []
 
-# Data model: each dict can have {"img_path": str or None, "name": str or None}
-thumbnails_data = []
+##############################################################################
+# Load any previously saved thumbnails
+##############################################################################
+thumbnails_data = load_thumbnails_data()
 
-# UI model: (element, is_real, slash_button, img_ui, title_panel, title_label)
+# UI model: list of 6-tuples: (element, is_real, slash_button, img_ui, title_panel, title_label)
 thumbnail_boxes = []
+
+##############################################################################
+# Thumbnail-building helper functions
+##############################################################################
 
 def load_pygame_image(filepath, width, height):
     try:
@@ -169,7 +235,7 @@ def create_real_box(data):
         )
 
     title_panel = pygame_gui.elements.UIPanel(
-        relative_rect=pygame.Rect((0,0),(50,40)), # 2x higher now: was 20, now 40
+        relative_rect=pygame.Rect((0,0),(50,40)),
         manager=manager,
         container=panel,
         object_id="#title_panel"
@@ -178,9 +244,8 @@ def create_real_box(data):
     title_panel.rebuild()
 
     title_text = data.get("name", "") if data.get("name") else ""
-    # We'll trust default text color is black on a white background
     title_label = pygame_gui.elements.UILabel(
-        relative_rect=pygame.Rect((5,0),(40,40)), # Adjust label height to 40
+        relative_rect=pygame.Rect((5,0),(40,40)),
         text=title_text,
         manager=manager,
         container=title_panel
@@ -253,7 +318,7 @@ def layout_thumbnails():
         element.show()
 
         if tpanel and tlabel:
-            tpanel.set_dimensions((thumbnail_width, 40))  # 2x height
+            tpanel.set_dimensions((thumbnail_width, 40))
             tpanel.set_relative_position((0, thumbnail_height - 40))
             tpanel.show()
             tlabel.set_dimensions((thumbnail_width - 10, 40))
@@ -352,6 +417,9 @@ def update_page_navigation():
     if 0 <= current_page_index < len(page_buttons):
         page_buttons[current_page_index].set_text("["+str(current_page_index+1)+"]")
 
+##############################################################################
+# Popup logic
+##############################################################################
 def open_popup(slash_button, associated_panel):
     global popup_window, popup_associated_thumb
     if popup_window is not None:
@@ -363,7 +431,7 @@ def open_popup(slash_button, associated_panel):
     popup_x = slash_abs_rect.right + 10
     popup_y = slash_abs_rect.top
     window_width = 200
-    window_height = 150
+    window_height = 190  # Increased to fit the new button
     popup_window_rect = pygame.Rect(popup_x, popup_y, window_width, window_height)
 
     popup_window_obj = pygame_gui.elements.UIWindow(
@@ -392,6 +460,14 @@ def open_popup(slash_button, associated_panel):
     delete_button = pygame_gui.elements.UIButton(
         relative_rect=pygame.Rect((10, 90), (180, 30)),
         text="Delete Thumbnail",
+        manager=manager,
+        container=popup_window_obj
+    )
+
+    # NEW BUTTON: "Link To Map"
+    link_to_map_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((10, 130), (180, 30)),
+        text="Link To Map",
         manager=manager,
         container=popup_window_obj
     )
@@ -500,13 +576,22 @@ while running:
         elif event.type == pygame.VIDEORESIZE:
             screen_width, screen_height = event.w, event.h
             screen = pygame.display.set_mode((screen_width, screen_height), pygame.RESIZABLE)
+            manager.set_window_resolution((screen_width, screen_height))
+
             bottom_bar_panel.set_relative_position((0, screen_height - bottom_bar_height))
             bottom_bar_panel.set_dimensions((screen_width, bottom_bar_height))
 
-            back_button_x = (screen_width - back_button_width) // 2
-            back_button_y = (bottom_bar_height - back_button_height) // 2
+            # Re-position both bottom buttons
+            total_width_for_two = button_width * 2 + button_spacing
+            back_button_x = (screen_width - total_width_for_two) // 2
+            back_button_y = (bottom_bar_height - button_height) // 2
             back_to_main_button.set_relative_position((back_button_x, back_button_y))
 
+            save_button_x = back_button_x + button_width + button_spacing
+            save_button_y = back_button_y
+            save_button.set_relative_position((save_button_x, save_button_y))
+
+            # Adjust the thumbnails area
             image_display_area.width = screen_width - 20
             image_display_area.height = screen_height - bottom_bar_height - 80
             thumbnails_panel.set_relative_position((image_display_area.left, image_display_area.top))
@@ -518,11 +603,18 @@ while running:
             goto_page(current_page)
 
         elif event.type == pygame_gui.UI_BUTTON_PRESSED:
+            # "Back to Main" -> Launch main.py
             if event.ui_element == back_to_main_button:
                 subprocess.Popen(["python", "main.py"])
                 pygame.quit()
                 sys.exit()
+
+            # "Save" -> save thumbnails_data
+            elif event.ui_element == save_button:
+                save_thumbnails_data(thumbnails_data)
+
             else:
+                # Handle pagination buttons
                 if event.ui_element in page_buttons:
                     idx = page_buttons.index(event.ui_element)
                     goto_page(idx)
@@ -536,53 +628,63 @@ while running:
                     total_thumbs = len(thumbnails_data) + 1
                     total_pages = math.ceil(total_thumbs / per_page) if total_thumbs > 0 else 1
                     goto_page(total_pages - 1)
-                else:
-                    clicked_on_real_box_slash = False
-                    if popup_window is not None:
-                        if event.ui_element.text == "Delete Thumbnail" and popup_associated_thumb is not None:
-                            delete_thumbnail(popup_associated_thumb)
+
+                # Popup window logic
+                if popup_window is not None:
+                    if event.ui_element.text == "Delete Thumbnail" and popup_associated_thumb is not None:
+                        delete_thumbnail(popup_associated_thumb)
+                        popup_window.kill()
+                        popup_window = None
+                        popup_associated_thumb = None
+
+                    elif event.ui_element.text == "Thumbnail Image" and popup_associated_thumb is not None:
+                        change_thumbnail_image(popup_associated_thumb)
+                        if popup_window:
                             popup_window.kill()
                             popup_window = None
                             popup_associated_thumb = None
-                        elif event.ui_element.text == "Thumbnail Image" and popup_associated_thumb is not None:
-                            change_thumbnail_image(popup_associated_thumb)
-                            if popup_window:
-                                popup_window.kill()
-                                popup_window = None
-                                popup_associated_thumb = None
-                        elif event.ui_element.text == "Change Name" and popup_associated_thumb is not None:
-                            open_name_popup(popup_associated_thumb)
+
+                    elif event.ui_element.text == "Change Name" and popup_associated_thumb is not None:
+                        open_name_popup(popup_associated_thumb)
+                        popup_window.kill()
+                        popup_window = None
+
+                    elif event.ui_element.text == "Link To Map" and popup_associated_thumb is not None:
+                        # Currently does nothing; placeholder
+                        print("Link To Map button clicked. (No action yet)")
+                        if popup_window:
                             popup_window.kill()
                             popup_window = None
-                            # popup_associated_thumb stays for name editing
-                        else:
-                            # Other popup buttons not handled
-                            pass
-                    elif name_popup_window is not None:
-                        # Name popup actions
-                        if event.ui_element.text == "OK" and popup_associated_thumb is not None and name_text_entry is not None:
-                            new_name = name_text_entry.get_text()
-                            set_thumbnail_name(popup_associated_thumb, new_name)
+                            popup_associated_thumb = None
+
+                # Name popup logic
+                elif name_popup_window is not None:
+                    if event.ui_element.text == "OK" and popup_associated_thumb is not None and name_text_entry is not None:
+                        new_name = name_text_entry.get_text()
+                        set_thumbnail_name(popup_associated_thumb, new_name)
+                        name_popup_window.kill()
+                        name_popup_window = None
+                        name_text_entry = None
+                        popup_associated_thumb = None
+
+                    elif event.ui_element.text == "Cancel":
+                        if name_popup_window:
                             name_popup_window.kill()
                             name_popup_window = None
                             name_text_entry = None
                             popup_associated_thumb = None
-                        elif event.ui_element.text == "Cancel":
-                            if name_popup_window:
-                                name_popup_window.kill()
-                                name_popup_window = None
-                                name_text_entry = None
-                                popup_associated_thumb = None
-                    else:
-                        # Not in popup mode, check thumbnails
-                        for i, (element, is_real, sbtn, img_ui, tpanel, tlabel) in enumerate(thumbnail_boxes):
-                            if event.ui_element == element and not is_real:
-                                add_new_thumbnail()
-                                break
-                            elif is_real and sbtn == event.ui_element:
-                                open_popup(sbtn, element)
-                                clicked_on_real_box_slash = True
-                                break
+
+                # Thumbnails
+                else:
+                    for i, (element, is_real, sbtn, img_ui, tpanel, tlabel) in enumerate(thumbnail_boxes):
+                        # Add new thumbnail
+                        if event.ui_element == element and not is_real:
+                            add_new_thumbnail()
+                            break
+                        # Open popup
+                        elif is_real and sbtn == event.ui_element:
+                            open_popup(sbtn, element)
+                            break
 
         elif event.type == pygame_gui.UI_WINDOW_CLOSE:
             if event.ui_element == popup_window:
@@ -600,6 +702,7 @@ while running:
     screen.fill(MAIN_BG_COLOR)
     pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
 
+    # Scale background to fit image_display_area
     img_width, img_height = background_surface.get_size()
     image_display_width = image_display_area.width
     image_display_height = image_display_area.height
