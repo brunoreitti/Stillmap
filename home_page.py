@@ -114,7 +114,7 @@ MAIN_BG_COLOR = (68, 71, 90)
 IMAGE_BG_COLOR = (40, 42, 54)
 
 ##############################################################################
-# Bottom bar: now with both "Back to Main" and "Save"
+# Bottom bar: "Back to Main" and "Save" buttons
 ##############################################################################
 bottom_bar_height = 60
 bottom_bar_panel = pygame_gui.elements.UIPanel(
@@ -138,7 +138,6 @@ back_to_main_button = pygame_gui.elements.UIButton(
     container=bottom_bar_panel
 )
 
-# "Save" button to the right of "Back to Main"
 save_button_x = back_button_x + button_width + button_spacing
 save_button_y = back_button_y
 save_button = pygame_gui.elements.UIButton(
@@ -183,6 +182,13 @@ last_page_button = None
 page_buttons = []
 
 ##############################################################################
+# DOUBLE-CLICK SUPPORT
+##############################################################################
+double_click_delay = 500  # milliseconds
+last_click_time = 0
+last_clicked_thumbnail = None
+
+##############################################################################
 # Load any previously saved thumbnails
 ##############################################################################
 thumbnails_data = load_thumbnails_data()
@@ -200,7 +206,7 @@ def load_pygame_image(filepath, width, height):
         img = pygame.transform.smoothscale(img, (width, height))
         return img
     except:
-        print(f"Failed to load or scale image: {filepath}")
+        print(f"Failed to load or scale image {filepath}")
         return None
 
 def create_add_box():
@@ -431,7 +437,7 @@ def open_popup(slash_button, associated_panel):
     popup_x = slash_abs_rect.right + 10
     popup_y = slash_abs_rect.top
     window_width = 200
-    window_height = 190  # Increased to fit the new button
+    window_height = 190  # Enough room for the new button
     popup_window_rect = pygame.Rect(popup_x, popup_y, window_width, window_height)
 
     popup_window_obj = pygame_gui.elements.UIWindow(
@@ -570,9 +576,15 @@ running = True
 
 while running:
     time_delta = clock.tick(60) / 1000.0
+
+    # We'll set the default arrow cursor at start of each frame
+    pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_ARROW)
+
+    # ========== Handle Events ==========
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+
         elif event.type == pygame.VIDEORESIZE:
             screen_width, screen_height = event.w, event.h
             screen = pygame.display.set_mode((screen_width, screen_height), pygame.RESIZABLE)
@@ -602,19 +614,20 @@ while running:
 
             goto_page(current_page)
 
+        # 1) Handle UI Buttons from pygame_gui
         elif event.type == pygame_gui.UI_BUTTON_PRESSED:
-            # "Back to Main" -> Launch main.py
+            # "Back to Main"
             if event.ui_element == back_to_main_button:
                 subprocess.Popen(["python", "main.py"])
                 pygame.quit()
                 sys.exit()
 
-            # "Save" -> save thumbnails_data
+            # "Save"
             elif event.ui_element == save_button:
                 save_thumbnails_data(thumbnails_data)
 
             else:
-                # Handle pagination buttons
+                # Pagination
                 if event.ui_element in page_buttons:
                     idx = page_buttons.index(event.ui_element)
                     goto_page(idx)
@@ -629,7 +642,7 @@ while running:
                     total_pages = math.ceil(total_thumbs / per_page) if total_thumbs > 0 else 1
                     goto_page(total_pages - 1)
 
-                # Popup window logic
+                # If a popup is open, handle the popup's buttons
                 if popup_window is not None:
                     if event.ui_element.text == "Delete Thumbnail" and popup_associated_thumb is not None:
                         delete_thumbnail(popup_associated_thumb)
@@ -650,14 +663,26 @@ while running:
                         popup_window = None
 
                     elif event.ui_element.text == "Link To Map" and popup_associated_thumb is not None:
-                        # Currently does nothing; placeholder
-                        print("Link To Map button clicked. (No action yet)")
+                        filetypes = [('JSON files', '*.json'), ('All files', '*.*')]
+                        selected_json = filedialog.askopenfilename(
+                            title="Select a JSON file for Map",
+                            initialdir=os.getcwd(),
+                            filetypes=filetypes
+                        )
+                        if selected_json:
+                            for i, (elem, ireal, sbtn, img_ui, tpanel, tlabel) in enumerate(thumbnail_boxes[:-1]):
+                                if elem == popup_associated_thumb:
+                                    thumbnails_data[i]["linked_map"] = selected_json
+                                    save_thumbnails_data(thumbnails_data)
+                                    print(f"Assigned JSON to thumbnail {i}: {selected_json}")
+                                    break
+
                         if popup_window:
                             popup_window.kill()
                             popup_window = None
                             popup_associated_thumb = None
 
-                # Name popup logic
+                # If a name popup is open, handle its buttons
                 elif name_popup_window is not None:
                     if event.ui_element.text == "OK" and popup_associated_thumb is not None and name_text_entry is not None:
                         new_name = name_text_entry.get_text()
@@ -674,17 +699,74 @@ while running:
                             name_text_entry = None
                             popup_associated_thumb = None
 
-                # Thumbnails
+        # 2) Handle Native Pygame Mouse Events (for double-click logic)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left click
+                current_time = pygame.time.get_ticks()
+                mouse_pos = event.pos
+
+                # Find which thumbnail (if any) was clicked
+                clicked_index = None
+                for i, (element, is_real, sbtn, img_ui, tpanel, tlabel) in enumerate(thumbnail_boxes):
+                    if is_real:
+                        if element.get_abs_rect().collidepoint(mouse_pos):
+                            clicked_index = i
+                            break
+                    else:
+                        # The '+' add box
+                        if element.get_abs_rect().collidepoint(mouse_pos):
+                            clicked_index = i
+                            break
+
+                if clicked_index is not None:
+                    # Did we double-click the same thumbnail as last time?
+                    time_diff = current_time - last_click_time
+                    if last_clicked_thumbnail == clicked_index and time_diff < double_click_delay:
+                        # Double-click
+                        print(f"Double-click on thumbnail {clicked_index}, time diff = {time_diff} ms")
+                        if clicked_index < len(thumbnails_data):
+                            if "linked_map" in thumbnails_data[clicked_index]:
+                                linked_json = thumbnails_data[clicked_index]["linked_map"]
+                                if os.path.isfile(linked_json):
+                                    print(f"Launching view_page.py with {linked_json}")
+                                    subprocess.Popen(["python", "view_page.py", linked_json])
+                                else:
+                                    print("Linked JSON file not found or invalid.")
+                            else:
+                                print("No 'linked_map' assigned to this thumbnail.")
+                        else:
+                            print("Clicked index doesn't correspond to valid data. Possibly the + box?")
+                        # Reset double-click detection
+                        last_clicked_thumbnail = None
+                        last_click_time = 0
+                    else:
+                        # Single click
+                        if clicked_index < len(thumbnails_data):
+                            # If it's the + box?
+                            if not thumbnails_data[clicked_index].get("img_path") and "linked_map" not in thumbnails_data[clicked_index]:
+                                # This is the plus box or a blank tile
+                                print("Clicked the + box or empty tile. No double-click logic needed.")
+                                add_new_thumbnail()
+                            else:
+                                print(f"Single click on thumbnail {clicked_index}  time diff={time_diff} ms")
+                            last_clicked_thumbnail = clicked_index
+                            last_click_time = current_time
                 else:
-                    for i, (element, is_real, sbtn, img_ui, tpanel, tlabel) in enumerate(thumbnail_boxes):
-                        # Add new thumbnail
-                        if event.ui_element == element and not is_real:
-                            add_new_thumbnail()
-                            break
-                        # Open popup
-                        elif is_real and sbtn == event.ui_element:
-                            open_popup(sbtn, element)
-                            break
+                    # No thumbnail clicked
+                    pass
+
+        elif event.type == pygame.MOUSEMOTION:
+            # We continuously check if the mouse is over a real thumbnail
+            mouse_pos = event.pos
+            hovered_on_real_thumbnail = False
+            for i, (element, is_real, sbtn, img_ui, tpanel, tlabel) in enumerate(thumbnail_boxes):
+                if is_real:
+                    if element.get_abs_rect().collidepoint(mouse_pos):
+                        hovered_on_real_thumbnail = True
+                        pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_HAND)
+                        break
+
+            # If not hovering any real thumbnail, it remains arrow (already set at loop start)
 
         elif event.type == pygame_gui.UI_WINDOW_CLOSE:
             if event.ui_element == popup_window:
@@ -698,6 +780,8 @@ while running:
         manager.process_events(event)
 
     manager.update(time_delta)
+
+    # ========== DRAW ==========
 
     screen.fill(MAIN_BG_COLOR)
     pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
