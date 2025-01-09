@@ -13,24 +13,34 @@ from tkinter import Tk, filedialog, messagebox
 from pdf2image import convert_from_path
 import cairosvg
 
-# Import the "map module" clone:
+# Import the "map module" clone
 import tile_system_view as tile_system
 
 pygame.init()
 Tk().withdraw()
 
+###############################################################################
+# Check if a JSON map was passed as an argument
+###############################################################################
+linked_json_to_load = None
+if len(sys.argv) > 1:
+    linked_json_to_load = sys.argv[1]
+    print(f"[view_page] Received argument => {linked_json_to_load}")
+else:
+    print("[view_page] No argument passed => no immediate load")
+
 def load_image(filepath):
     """
-    Minimal load: cv2.imread(...) from normalized path.
-    No EXIF orientation logic here, but you can add if needed.
+    Minimal load: cv2.imread. If you want PDF/SVG logic, add it here.
     """
     path = os.path.normpath(filepath)
+    print(f"[DEBUG load_image] Attempting cv2.imread => {path}")
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     return img
 
 def cv2_to_pygame(img_cv2):
     """
-    Convert BGR or BGRA -> RGB or RGBA for pygame.
+    Convert BGR/BGRA -> pygame Surface
     """
     if img_cv2 is None:
         return None
@@ -65,7 +75,7 @@ IMAGE_BG_COLOR = (40, 42, 54)
 root = Tk()
 root.withdraw()
 
-# Plug references into tile_system
+# Provide references into tile_system
 tile_system.bring_window_to_front = bring_window_to_front
 tile_system.load_image = load_image
 tile_system.cv2_to_pygame = cv2_to_pygame
@@ -176,9 +186,6 @@ panning = False
 pan_start_pos = None
 
 def reset_map_view():
-    """
-    Center map on the player's position if follow_player is True.
-    """
     global zoom_factor
     tile_image_rect = tile_image.get_abs_rect()
     scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
@@ -187,9 +194,6 @@ def reset_map_view():
     print("[view_page] reset_map_view => map_offset updated for player pos")
 
 def adjust_zoom(old_zoom, new_zoom):
-    """
-    Zoom around the center if not following the player.
-    """
     if follow_player:
         return
     tile_image_rect = tile_image.get_abs_rect()
@@ -200,8 +204,19 @@ def adjust_zoom(old_zoom, new_zoom):
     tile_system.map_offset[0] = center_x - map_x_before * tile_system.SQUARE_SIZE * new_zoom
     tile_system.map_offset[1] = center_y - map_y_before * tile_system.SQUARE_SIZE * new_zoom
 
+###############################################################################
+# AUTO-LOAD the JSON if we got one from sys.argv
+###############################################################################
+if linked_json_to_load and os.path.isfile(linked_json_to_load):
+    print(f"[view_page] Auto-loading map => {linked_json_to_load}")
+    tile_system.save_current_state_to_history()
+    tile_system.load_game_state_from_file(linked_json_to_load)
+    # Optionally reset or zoom:
+    zoom_factor = 1.0
+    reset_map_view()
+
 while running:
-    time_delta = clock.tick(60)/1000.0
+    time_delta = clock.tick(60) / 1000.0
     screen.fill(MAIN_BG_COLOR)
 
     for event in pygame.event.get():
@@ -217,7 +232,6 @@ while running:
             restore_tile_window_button.set_relative_position((screen_width - 50, 10))
 
         elif event.type == pygame.KEYDOWN:
-            # Exactly as in main.py: rotate left/right, move forward/back
             if event.key == pygame.K_LEFT:
                 tile_system.save_current_state_to_history()
                 tile_system.rotate_player(pygame.K_LEFT)
@@ -242,11 +256,11 @@ while running:
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 4:  # wheel up => zoom in
                 old_z = zoom_factor
-                zoom_factor = min(zoom_factor+0.1, MAX_ZOOM)
+                zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
                 adjust_zoom(old_z, zoom_factor)
             elif event.button == 5:  # wheel down => zoom out
                 old_z = zoom_factor
-                zoom_factor = max(zoom_factor-0.1, MIN_ZOOM)
+                zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
                 adjust_zoom(old_z, zoom_factor)
             elif event.button == 1:  # left click => tile select/double-click or panning
                 tile_img_rect = tile_image.get_abs_rect()
@@ -303,7 +317,6 @@ while running:
                 subprocess.Popen(["python", "home_page.py"])
                 pygame.quit()
                 sys.exit()
-
             elif event.ui_element == load_game_button:
                 tile_system.save_current_state_to_history()
                 tile_system.load_game_state()
@@ -372,8 +385,8 @@ while running:
         scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
 
         if follow_player:
-            offset_x = tile_img_rect.width//2 - tile_system.player_pos[1] * scaled_sq
-            offset_y = tile_img_rect.height//2 - tile_system.player_pos[0] * scaled_sq
+            offset_x = tile_img_rect.width // 2 - tile_system.player_pos[1] * scaled_sq
+            offset_y = tile_img_rect.height // 2 - tile_system.player_pos[0] * scaled_sq
         else:
             offset_x, offset_y = tile_system.map_offset
 
@@ -389,7 +402,7 @@ while running:
         if img_cv2 is not None:
             ih, iw = img_cv2.shape[:2]
             sf = min(main_area.width / iw, main_area.height / ih)
-            if sf <= 0: 
+            if sf <= 0:
                 sf = 1
             new_w = int(iw * sf)
             new_h = int(ih * sf)
