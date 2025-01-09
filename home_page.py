@@ -210,6 +210,7 @@ def load_pygame_image(filepath, width, height):
         return None
 
 def create_add_box():
+    # The "+" box is a separate UI element
     add_box = pygame_gui.elements.UIButton(
         relative_rect=pygame.Rect((0,0), (100,50)),
         text="+",
@@ -257,6 +258,7 @@ def create_real_box(data):
         container=title_panel
     )
 
+    # The slash button is a separate UI element on top of the panel
     slash_button = pygame_gui.elements.UIButton(
         relative_rect=pygame.Rect((0,0), (20,20)),
         text="/",
@@ -267,6 +269,7 @@ def create_real_box(data):
     return panel, slash_button, img_ui, title_panel, title_label
 
 def rebuild_thumbnail_boxes():
+    # Clear old UI
     for (elem, ireal, sbtn, img_ui, tpanel, tlabel) in thumbnail_boxes:
         elem.kill()
         if sbtn:
@@ -279,10 +282,12 @@ def rebuild_thumbnail_boxes():
             tlabel.kill()
     thumbnail_boxes.clear()
 
+    # Build new UI for each saved thumbnail
     for d in thumbnails_data:
         panel, slash_button, img_ui, title_panel, title_label = create_real_box(d)
         thumbnail_boxes.append((panel, True, slash_button, img_ui, title_panel, title_label))
 
+    # Add the "+" box at the end
     add_box = create_add_box()
     thumbnail_boxes.append((add_box, False, None, None, None, None))
 
@@ -307,7 +312,7 @@ def layout_thumbnails():
 
     thumbnail_width, thumbnail_height = calculate_thumbnail_layout()
 
-    total_thumbs = len(thumbnails_data) + 1
+    total_thumbs = len(thumbnails_data) + 1  # one for the + box
     start_index = current_page * per_page
     end_index = start_index + per_page
     visible_boxes = thumbnail_boxes[start_index:end_index]
@@ -332,6 +337,7 @@ def layout_thumbnails():
             tlabel.show()
 
         if is_real:
+            # This is a real thumbnail
             global_index = thumbnail_boxes.index((element, is_real, slash_btn, img_ui, tpanel, tlabel))
             data_index = global_index
             data = thumbnails_data[data_index]
@@ -426,14 +432,17 @@ def update_page_navigation():
 ##############################################################################
 # Popup logic
 ##############################################################################
-def open_popup(slash_button, associated_panel):
+def open_popup(associated_button, associated_panel):
+    """
+    We'll pass in slash_button, panel so we know which panel to modify.
+    """
     global popup_window, popup_associated_thumb
     if popup_window is not None:
         popup_window.kill()
         popup_window = None
         popup_associated_thumb = None
 
-    slash_abs_rect = slash_button.get_abs_rect()
+    slash_abs_rect = associated_button.get_abs_rect()
     popup_x = slash_abs_rect.right + 10
     popup_y = slash_abs_rect.top
     window_width = 200
@@ -470,7 +479,6 @@ def open_popup(slash_button, associated_panel):
         container=popup_window_obj
     )
 
-    # NEW BUTTON: "Link To Map"
     link_to_map_button = pygame_gui.elements.UIButton(
         relative_rect=pygame.Rect((10, 130), (180, 30)),
         text="Link To Map",
@@ -485,8 +493,6 @@ def goto_page(page_index):
     global current_page
     total_thumbs = len(thumbnails_data) + 1
     total_pages = math.ceil(total_thumbs / per_page) if total_thumbs > 0 else 1
-    if total_pages < 1:
-        total_pages = 1
     current_page = max(0, min(page_index, total_pages - 1))
     layout_thumbnails()
 
@@ -568,6 +574,7 @@ def set_thumbnail_name(panel_to_change, new_name):
             goto_page(current_page)
             return
 
+# Build + layout the UI
 rebuild_thumbnail_boxes()
 goto_page(0)
 
@@ -577,10 +584,6 @@ running = True
 while running:
     time_delta = clock.tick(60) / 1000.0
 
-    # We'll set the default arrow cursor at start of each frame
-    pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_ARROW)
-
-    # ========== Handle Events ==========
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -593,7 +596,6 @@ while running:
             bottom_bar_panel.set_relative_position((0, screen_height - bottom_bar_height))
             bottom_bar_panel.set_dimensions((screen_width, bottom_bar_height))
 
-            # Re-position both bottom buttons
             total_width_for_two = button_width * 2 + button_spacing
             back_button_x = (screen_width - total_width_for_two) // 2
             back_button_y = (bottom_bar_height - button_height) // 2
@@ -603,7 +605,6 @@ while running:
             save_button_y = back_button_y
             save_button.set_relative_position((save_button_x, save_button_y))
 
-            # Adjust the thumbnails area
             image_display_area.width = screen_width - 20
             image_display_area.height = screen_height - bottom_bar_height - 80
             thumbnails_panel.set_relative_position((image_display_area.left, image_display_area.top))
@@ -614,35 +615,51 @@ while running:
 
             goto_page(current_page)
 
-        # 1) Handle UI Buttons from pygame_gui
         elif event.type == pygame_gui.UI_BUTTON_PRESSED:
-            # "Back to Main"
+            # 1) "Back to Main"
             if event.ui_element == back_to_main_button:
                 subprocess.Popen(["python", "main.py"])
                 pygame.quit()
                 sys.exit()
 
-            # "Save"
+            # 2) "Save"
             elif event.ui_element == save_button:
                 save_thumbnails_data(thumbnails_data)
 
-            else:
-                # Pagination
-                if event.ui_element in page_buttons:
-                    idx = page_buttons.index(event.ui_element)
-                    goto_page(idx)
-                elif first_page_button and event.ui_element == first_page_button:
-                    goto_page(0)
-                elif prev_page_button and event.ui_element == prev_page_button:
-                    goto_page(current_page - 1)
-                elif next_page_button and event.ui_element == next_page_button:
-                    goto_page(current_page + 1)
-                elif last_page_button and event.ui_element == last_page_button:
-                    total_thumbs = len(thumbnails_data) + 1
-                    total_pages = math.ceil(total_thumbs / per_page) if total_thumbs > 0 else 1
-                    goto_page(total_pages - 1)
+            # 3) Pagination
+            elif event.ui_element in page_buttons:
+                idx = page_buttons.index(event.ui_element)
+                goto_page(idx)
+            elif first_page_button and event.ui_element == first_page_button:
+                goto_page(0)
+            elif prev_page_button and event.ui_element == prev_page_button:
+                goto_page(current_page - 1)
+            elif next_page_button and event.ui_element == next_page_button:
+                goto_page(current_page + 1)
+            elif last_page_button and event.ui_element == last_page_button:
+                total_thumbs = len(thumbnails_data) + 1
+                total_pages = math.ceil(total_thumbs / per_page) if total_thumbs > 0 else 1
+                goto_page(total_pages - 1)
 
-                # If a popup is open, handle the popup's buttons
+            # 4) Check if the user pressed the "+" box or slash button
+            else:
+                # Because the last item in thumbnail_boxes is the + box, we can check:
+                add_box_tuple = thumbnail_boxes[-1]  # (add_box, False, None, None, None, None)
+                add_box_element = add_box_tuple[0]
+
+                # If it's the plus box:
+                if event.ui_element == add_box_element:
+                    print("Pressed the + box => add_new_thumbnail()")
+                    add_new_thumbnail()
+                else:
+                    # Maybe a slash button?
+                    for (panel, is_real, slash_btn, img_ui, tpanel, tlabel) in thumbnail_boxes:
+                        if is_real and slash_btn and event.ui_element == slash_btn:
+                            print("Pressed slash button => open popup")
+                            open_popup(slash_btn, panel)
+                            break
+
+                # If a popup is open, handle the popup window's buttons
                 if popup_window is not None:
                     if event.ui_element.text == "Delete Thumbnail" and popup_associated_thumb is not None:
                         delete_thumbnail(popup_associated_thumb)
@@ -699,30 +716,25 @@ while running:
                             name_text_entry = None
                             popup_associated_thumb = None
 
-        # 2) Handle Native Pygame Mouse Events (for double-click logic)
+        # Single/double click logic for real thumbnail panels
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left click
                 current_time = pygame.time.get_ticks()
                 mouse_pos = event.pos
 
-                # Find which thumbnail (if any) was clicked
+                # We'll see if the user clicked a "panel" that is is_real = True
                 clicked_index = None
-                for i, (element, is_real, sbtn, img_ui, tpanel, tlabel) in enumerate(thumbnail_boxes):
+                for i, (element, is_real, slash_btn, img_ui, tpanel, tlabel) in enumerate(thumbnail_boxes):
+                    # Only treat it as a panel click if is_real
                     if is_real:
-                        if element.get_abs_rect().collidepoint(mouse_pos):
-                            clicked_index = i
-                            break
-                    else:
-                        # The '+' add box
                         if element.get_abs_rect().collidepoint(mouse_pos):
                             clicked_index = i
                             break
 
                 if clicked_index is not None:
-                    # Did we double-click the same thumbnail as last time?
                     time_diff = current_time - last_click_time
                     if last_clicked_thumbnail == clicked_index and time_diff < double_click_delay:
-                        # Double-click
+                        # Double-click on a real thumbnail
                         print(f"Double-click on thumbnail {clicked_index}, time diff = {time_diff} ms")
                         if clicked_index < len(thumbnails_data):
                             if "linked_map" in thumbnails_data[clicked_index]:
@@ -734,39 +746,18 @@ while running:
                                     print("Linked JSON file not found or invalid.")
                             else:
                                 print("No 'linked_map' assigned to this thumbnail.")
-                        else:
-                            print("Clicked index doesn't correspond to valid data. Possibly the + box?")
                         # Reset double-click detection
                         last_clicked_thumbnail = None
                         last_click_time = 0
                     else:
-                        # Single click
-                        if clicked_index < len(thumbnails_data):
-                            # If it's the + box?
-                            if not thumbnails_data[clicked_index].get("img_path") and "linked_map" not in thumbnails_data[clicked_index]:
-                                # This is the plus box or a blank tile
-                                print("Clicked the + box or empty tile. No double-click logic needed.")
-                                add_new_thumbnail()
-                            else:
-                                print(f"Single click on thumbnail {clicked_index}  time diff={time_diff} ms")
-                            last_clicked_thumbnail = clicked_index
-                            last_click_time = current_time
+                        # Single click on a real thumbnail
+                        print(f"Single click on thumbnail {clicked_index} time diff={time_diff} ms")
+                        last_clicked_thumbnail = clicked_index
+                        last_click_time = current_time
                 else:
-                    # No thumbnail clicked
+                    # Possibly we clicked outside or on the + box or slash button,
+                    # but those are handled in UI_BUTTON_PRESSED, so do nothing here.
                     pass
-
-        elif event.type == pygame.MOUSEMOTION:
-            # We continuously check if the mouse is over a real thumbnail
-            mouse_pos = event.pos
-            hovered_on_real_thumbnail = False
-            for i, (element, is_real, sbtn, img_ui, tpanel, tlabel) in enumerate(thumbnail_boxes):
-                if is_real:
-                    if element.get_abs_rect().collidepoint(mouse_pos):
-                        hovered_on_real_thumbnail = True
-                        pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_HAND)
-                        break
-
-            # If not hovering any real thumbnail, it remains arrow (already set at loop start)
 
         elif event.type == pygame_gui.UI_WINDOW_CLOSE:
             if event.ui_element == popup_window:
@@ -801,6 +792,24 @@ while running:
         screen.blit(scaled_background, background_rect)
 
     manager.draw_ui(screen)
+
+    # Check hover for clickable items
+    mouse_pos = pygame.mouse.get_pos()
+    is_over_something_clickable = False
+    # Check slash buttons, real thumbnail panels, plus box
+    for (element, is_real, slash_btn, img_ui, tpanel, tlabel) in thumbnail_boxes:
+        if element.get_abs_rect().collidepoint(mouse_pos):
+            is_over_something_clickable = True
+            break
+        if slash_btn and slash_btn.get_abs_rect().collidepoint(mouse_pos):
+            is_over_something_clickable = True
+            break
+
+    if is_over_something_clickable:
+        pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_HAND)
+    else:
+        pygame.mouse.set_system_cursor(pygame.SYSTEM_CURSOR_ARROW)
+
     pygame.display.flip()
 
 pygame.quit()
