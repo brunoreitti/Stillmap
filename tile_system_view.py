@@ -144,22 +144,22 @@ class Tile:
 
         color = BLACK
         if not self.active:
-            color = (128,128,128)
+            color = (128, 128, 128)
 
         pygame.draw.rect(surface, color, rect, 1)
         if sub_grid_visible:
-            sub_square_size = scaled_size/3
-            for i in range(1,3):
+            sub_square_size = scaled_size / 3
+            for i in range(1, 3):
                 pygame.draw.line(surface, color,
-                                 (rect.left, rect.top + i*sub_square_size),
-                                 (rect.right, rect.top + i*sub_square_size), 1)
-            for j in range(1,3):
+                                 (rect.left, rect.top + i * sub_square_size),
+                                 (rect.right, rect.top + i * sub_square_size), 1)
+            for j in range(1, 3):
                 pygame.draw.line(surface, color,
-                                 (rect.left + j*sub_square_size, rect.top),
-                                 (rect.left + j*sub_square_size, rect.bottom), 1)
+                                 (rect.left + j * sub_square_size, rect.top),
+                                 (rect.left + j * sub_square_size, rect.bottom), 1)
 
             if self.selected:
-                pygame.draw.rect(surface, (255,0,0), rect, 3)
+                pygame.draw.rect(surface, (255, 0, 0), rect, 3)
 
 
 def initialize():
@@ -175,19 +175,19 @@ def get_current_tile():
 
 def create_tile(row, col):
     if (row, col) not in tiles:
-        tiles[(row,col)] = Tile(row,col)
+        tiles[(row, col)] = Tile(row, col)
         print(f"[tile_system_view] Created tile => ({row},{col})")
     else:
         print(f"[tile_system_view] Tile => ({row},{col}) already exists.")
 
-def delete_tile(row,col):
-    if (row,col) in tiles:
-        tile_obj = tiles[(row,col)]
-        vector_lines[:] = [v for v in vector_lines if v.start_tile!= tile_obj and v.end_tile!= tile_obj]
-        del tiles[(row,col)]
+def delete_tile(row, col):
+    if (row, col) in tiles:
+        tile_obj = tiles[(row, col)]
+        vector_lines[:] = [v for v in vector_lines if v.start_tile != tile_obj and v.end_tile != tile_obj]
+        del tiles[(row, col)]
         print(f"[tile_system_view] Deleted tile => ({row},{col})")
     else:
-        print("[tile_system_view] no tile to delete =>", (row,col))
+        print("[tile_system_view] no tile to delete =>", (row, col))
 
 def draw_board(mouse_pos, offset_x, offset_y, surface, visible_area, zoom_factor):
     if background_image is not None:
@@ -201,56 +201,56 @@ def draw_board(mouse_pos, offset_x, offset_y, surface, visible_area, zoom_factor
 
 def draw_player(offset_x, offset_y, surface, zoom_factor):
     global player_direction
-    px = player_pos[1] * SQUARE_SIZE* zoom_factor + offset_x + (SQUARE_SIZE* zoom_factor/2)
-    py = player_pos[0] * SQUARE_SIZE* zoom_factor + offset_y + (SQUARE_SIZE* zoom_factor/2)
-    arrow_len = (SQUARE_SIZE* zoom_factor)/2
-    arrow_w   = (SQUARE_SIZE* zoom_factor)/4
-    color = (255,255,255)
+    px = player_pos[1] * SQUARE_SIZE * zoom_factor + offset_x + (SQUARE_SIZE * zoom_factor / 2)
+    py = player_pos[0] * SQUARE_SIZE * zoom_factor + offset_y + (SQUARE_SIZE * zoom_factor / 2)
+    arrow_len = (SQUARE_SIZE * zoom_factor) / 2
+    arrow_w   = (SQUARE_SIZE * zoom_factor) / 4
+    color = (255, 255, 255)
 
     # 8 direction arrow
-    if player_direction==0: # up
+    if player_direction == 0:  # up
         pygame.draw.polygon(surface, color, [
             (px, py - arrow_len),
             (px - arrow_w, py),
             (px + arrow_w, py)
         ])
-    elif player_direction==1: # up-right
+    elif player_direction == 1:  # up-right
         pygame.draw.polygon(surface, color, [
             (px + arrow_len, py - arrow_len),
             (px + arrow_w, py),
             (px, py - arrow_w)
         ])
-    elif player_direction==2: # right
+    elif player_direction == 2:  # right
         pygame.draw.polygon(surface, color, [
             (px + arrow_len, py),
             (px, py - arrow_w),
             (px, py + arrow_w)
         ])
-    elif player_direction==3: # down-right
+    elif player_direction == 3:  # down-right
         pygame.draw.polygon(surface, color, [
             (px + arrow_len, py + arrow_len),
             (px + arrow_w, py),
             (px, py + arrow_w)
         ])
-    elif player_direction==4: # down
+    elif player_direction == 4:  # down
         pygame.draw.polygon(surface, color, [
             (px, py + arrow_len),
             (px - arrow_w, py),
             (px + arrow_w, py)
         ])
-    elif player_direction==5: # down-left
+    elif player_direction == 5:  # down-left
         pygame.draw.polygon(surface, color, [
             (px - arrow_len, py + arrow_len),
             (px - arrow_w, py),
             (px, py + arrow_w)
         ])
-    elif player_direction==6: # left
+    elif player_direction == 6:  # left
         pygame.draw.polygon(surface, color, [
             (px - arrow_len, py),
             (px, py - arrow_w),
             (px, py + arrow_w)
         ])
-    elif player_direction==7: # up-left
+    elif player_direction == 7:  # up-left
         pygame.draw.polygon(surface, color, [
             (px - arrow_len, py - arrow_len),
             (px - arrow_w, py),
@@ -258,135 +258,152 @@ def draw_player(offset_x, offset_y, surface, zoom_factor):
         ])
 
 def move_player(forward=True):
+    """
+    Moved tile logic so the displayed image remains consistent
+    with the player's direction instead of resetting to 0.
+    """
     global player_pos, player_direction, current_image_index
-    d= player_direction
+    d = player_direction
     if not forward:
-        d= (d+4) % 8
-    new_pos= player_pos[:]
-    if d==0:
-        new_pos[0]-=1
-    elif d==1:
-        new_pos[0]-=1
-        new_pos[1]+=1
-    elif d==2:
-        new_pos[1]+=1
-    elif d==3:
-        new_pos[0]+=1
-        new_pos[1]+=1
-    elif d==4:
-        new_pos[0]+=1
-    elif d==5:
-        new_pos[0]+=1
-        new_pos[1]-=1
-    elif d==6:
-        new_pos[1]-=1
-    elif d==7:
-        new_pos[0]-=1
-        new_pos[1]-=1
+        d = (d + 4) % 8
+    new_pos = player_pos[:]
 
-    tile= tiles.get((new_pos[0], new_pos[1]))
+    if d == 0:
+        new_pos[0] -= 1
+    elif d == 1:
+        new_pos[0] -= 1
+        new_pos[1] += 1
+    elif d == 2:
+        new_pos[1] += 1
+    elif d == 3:
+        new_pos[0] += 1
+        new_pos[1] += 1
+    elif d == 4:
+        new_pos[0] += 1
+    elif d == 5:
+        new_pos[0] += 1
+        new_pos[1] -= 1
+    elif d == 6:
+        new_pos[1] -= 1
+    elif d == 7:
+        new_pos[0] -= 1
+        new_pos[1] -= 1
+
+    tile = tiles.get((new_pos[0], new_pos[1]))
     if tile and tile.active:
-        player_pos[:]= new_pos
-        current_image_index=0
-        print(f"[tile_system_view] move_player => new pos {player_pos}")
+        player_pos[:] = new_pos
+        # Instead of resetting to 0, align with the current direction
+        if tile.image_filenames:
+            current_image_index = player_direction % len(tile.image_filenames)
+        else:
+            current_image_index = 0
+
+        print(f"[tile_system_view] move_player => new pos {player_pos}, direction={player_direction}, image_index={current_image_index}")
     else:
         print("[tile_system_view] can't move => tile missing or inactive")
 
 def rotate_player(key):
     global player_direction, current_image_index
-    if key== pygame.K_LEFT:
-        player_direction= (player_direction-1) % 8
-    elif key== pygame.K_RIGHT:
-        player_direction= (player_direction+1) % 8
+    if key == pygame.K_LEFT:
+        player_direction = (player_direction - 1) % 8
+    elif key == pygame.K_RIGHT:
+        player_direction = (player_direction + 1) % 8
 
-    cur_tile= get_current_tile()
+    cur_tile = get_current_tile()
     if cur_tile and cur_tile.image_filenames:
-        current_image_index= (current_image_index+1) % len(cur_tile.image_filenames)
+        num_images = len(cur_tile.image_filenames)
+        current_image_index = player_direction % num_images
+    else:
+        current_image_index = 0
 
     print(f"[tile_system_view] rotate_player => direction={player_direction}, image_index={current_image_index}")
 
 def move_player_to_tile(row, col):
     global player_pos, current_image_index
-    tile= tiles.get((row,col))
+    tile = tiles.get((row, col))
     if tile and tile.active:
-        player_pos[0]= row
-        player_pos[1]= col
-        current_image_index=0
+        player_pos[0] = row
+        player_pos[1] = col
+        # Instead of forcing index=0, keep consistent with the player's direction
+        if tile.image_filenames:
+            current_image_index = player_direction % len(tile.image_filenames)
+        else:
+            current_image_index = 0
         print(f"[tile_system_view] move_player_to_tile => new pos= {player_pos}")
     else:
         print("[tile_system_view] can't move => tile missing or inactive")
 
 def toggle_edit_mode():
     global edit_mode
-    edit_mode= not edit_mode
+    edit_mode = not edit_mode
 
 def toggle_json_link_mode():
     global json_link_mode, clear_json_link_mode
-    json_link_mode= not json_link_mode
-    clear_json_link_mode= False
+    json_link_mode = not json_link_mode
+    clear_json_link_mode = False
 
 def toggle_clear_json_link_mode():
     global clear_json_link_mode, json_link_mode
-    clear_json_link_mode= not clear_json_link_mode
-    json_link_mode= False
+    clear_json_link_mode = not clear_json_link_mode
+    json_link_mode = False
 
 def remove_current_tile_folder():
-    tile= get_current_tile()
+    tile = get_current_tile()
     if tile:
         tile.clear_directory()
 
 def clear_current_tile_json_link():
-    tile= get_current_tile()
+    tile = get_current_tile()
     if tile:
         tile.clear_json_file()
 
 def set_background_image(image_surface, image_path):
     global background_image, background_image_path
-    background_image= image_surface
-    background_image_path= image_path
+    background_image = image_surface
+    background_image_path = image_path
 
 def reset_map_view():
     global map_offset
-    map_offset= [0,0]
+    map_offset = [0, 0]
     print("[tile_system_view] reset_map_view => map_offset => [0,0]")
 
-def select_tile(row,col):
+def select_tile(row, col):
     global selected_tile
-    t= get_tile(row,col)
+    t = get_tile(row, col)
     if t:
         if selected_tile and selected_tile in tiles:
-            tiles[selected_tile].selected= False
-        t.selected= True
-        selected_tile= (row,col)
+            tiles[selected_tile].selected = False
+        t.selected = True
+        selected_tile = (row, col)
         print(f"[tile_system_view] select_tile => tile ({row},{col})")
     else:
-        print("[tile_system_view] no tile =>", (row,col))
+        print("[tile_system_view] no tile =>", (row, col))
 
 def deselect_tile():
     global selected_tile
     if selected_tile and selected_tile in tiles:
-        tiles[selected_tile].selected= False
-    selected_tile= None
+        tiles[selected_tile].selected = False
+    selected_tile = None
 
-def move_selected_tile_to(row,col):
+def move_selected_tile_to(row, col):
     pass
 
 def load_game_state():
     global current_loaded_file
-    files= [f for f in os.listdir(save_directory) if f.endswith(".json")]
+    files = [f for f in os.listdir(save_directory) if f.endswith(".json")]
     if not files:
-        messagebox.showwarning("Load Game","No saved games found.")
+        messagebox.showwarning("Load Game", "No saved games found.")
         return
 
-    selected_file= filedialog.askopenfilename(
+    selected_file = filedialog.askopenfilename(
         title="Select a saved game",
         initialdir=save_directory,
-        filetypes=[("JSON files","*.json")]
+        filetypes=[("JSON files", "*.json")]
     )
     if not selected_file:
         return
 
-    current_loaded_file= selected_file
+    current_loaded_file = selected_file
     load_game_state_from_file(selected_file)
     if bring_window_to_front:
         bring_window_to_front()
@@ -394,8 +411,8 @@ def load_game_state():
 def load_game_state_from_file(filepath):
     global player_pos, player_direction, current_image_index, current_loaded_file
     try:
-        with open(filepath,"r",encoding="utf-8") as f:
-            game_state= json.load(f)
+        with open(filepath, "r", encoding="utf-8") as f:
+            game_state = json.load(f)
         load_game_state_from_dict(game_state)
         print("[tile_system_view] load_game_state_from_file => success =>", filepath)
     except Exception as e:
@@ -411,49 +428,49 @@ def load_game_state_from_dict(game_state):
 
     try:
         player_pos[:] = game_state["player_position"]
-        player_direction= game_state["player_direction"]
-        sub_grid_visible= game_state.get("grid_visible", True)
-        map_offset= game_state.get("map_offset",[0,0])
-        background_image_path= game_state.get("background_image_path",None)
+        player_direction = game_state["player_direction"]
+        sub_grid_visible = game_state.get("grid_visible", True)
+        map_offset = game_state.get("map_offset", [0, 0])
+        background_image_path = game_state.get("background_image_path", None)
 
         tiles.clear()
-        selected_tile= None
+        selected_tile = None
         vector_lines.clear()
 
         for t_data in game_state["tiles"]:
-            row= t_data["row"]
-            col= t_data["col"]
-            tile= Tile(row,col)
-            tile.active= t_data.get("active",True)
-            tile.directory= t_data.get("directory",None)
-            tile.image_filenames= t_data.get("image_filenames",[])
-            tile.json_file= t_data.get("json_file",None)
-            tile.folder_link= t_data.get("folder_link",None)
-            tile.subgrid_occupied= t_data.get("subgrid_occupied", [[False]*3 for _ in range(3)])
-            link_areas_data= t_data.get("link_areas",{})
-            conv={}
+            row = t_data["row"]
+            col = t_data["col"]
+            tile = Tile(row, col)
+            tile.active = t_data.get("active", True)
+            tile.directory = t_data.get("directory", None)
+            tile.image_filenames = t_data.get("image_filenames", [])
+            tile.json_file = t_data.get("json_file", None)
+            tile.folder_link = t_data.get("folder_link", None)
+            tile.subgrid_occupied = t_data.get("subgrid_occupied", [[False]*3 for _ in range(3)])
+            link_areas_data = t_data.get("link_areas", {})
+            conv = {}
             for img_i_str, areas in link_areas_data.items():
                 conv[int(img_i_str)] = areas
-            tile.link_areas= conv
-            tiles[(row,col)] = tile
+            tile.link_areas = conv
+            tiles[(row, col)] = tile
 
         if background_image_path and os.path.exists(background_image_path):
             if load_image:
                 # read a plain image from background_image_path
-                cv2_img= load_image(background_image_path)
+                cv2_img = load_image(background_image_path)
                 if cv2_img is not None and cv2_to_pygame is not None:
-                    background_image= cv2_to_pygame(cv2_img)
+                    background_image = cv2_to_pygame(cv2_img)
                 else:
-                    background_image= None
+                    background_image = None
             else:
-                background_image= None
+                background_image = None
         else:
-            background_image= None
+            background_image = None
 
-        for vdata in game_state.get("vector_lines",[]):
+        for vdata in game_state.get("vector_lines", []):
             pass
 
-        current_image_index=0
+        current_image_index = 0
         print("[tile_system_view] load_game_state_from_dict => success")
     except Exception as e:
         print("[tile_system_view] error =>", e)
