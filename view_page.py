@@ -1,5 +1,3 @@
-# view_page.py
-
 import pygame
 import pygame_gui
 import ctypes
@@ -13,14 +11,15 @@ from tkinter import Tk, filedialog, messagebox
 from pdf2image import convert_from_path
 import cairosvg
 
-# Import the "map module" clone
+# "map module" like tile_system.py
 import tile_system_view as tile_system
 
 pygame.init()
-Tk().withdraw()
+root = Tk()
+root.withdraw()
 
 ###############################################################################
-# Check if a JSON map was passed as an argument
+# If a JSON map path is passed as an argument, store it
 ###############################################################################
 linked_json_to_load = None
 if len(sys.argv) > 1:
@@ -29,19 +28,49 @@ if len(sys.argv) > 1:
 else:
     print("[view_page] No argument passed => no immediate load")
 
+###############################################################################
+# HELPER FUNCTIONS (PDF/SVG or normal images)
+###############################################################################
+def load_pdf_page(pdf_path, page_number=0, dpi=300):
+    try:
+        pages = convert_from_path(pdf_path, dpi=dpi)
+        if pages:
+            pil_image = pages[page_number]
+            open_cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGBA2BGRA)
+            return open_cv_image
+        else:
+            print(f"No pages found in PDF: {pdf_path}")
+            return None
+    except Exception as e:
+        print(f"Failed to load PDF {pdf_path}: {e}")
+        return None
+
+def load_svg_image(svg_path, output_width=None, output_height=None):
+    try:
+        png_data = cairosvg.svg2png(url=svg_path, output_width=output_width, output_height=output_height)
+        nparr = np.frombuffer(png_data, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+        return image
+    except Exception as e:
+        print(f"Failed to load SVG {svg_path}: {e}")
+        return None
+
 def load_image(filepath):
-    """
-    Minimal load: cv2.imread. If you want PDF/SVG logic, add it here.
-    """
     path = os.path.normpath(filepath)
-    print(f"[DEBUG load_image] Attempting cv2.imread => {path}")
-    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-    return img
+    _, ext = os.path.splitext(path)
+    ext = ext.lower()
+
+    if ext == '.pdf':
+        return load_pdf_page(path)
+    elif ext == '.svg':
+        return load_svg_image(path)
+    else:
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            print(f"[DEBUG] cv2.imread returned None for: {path}")
+        return img
 
 def cv2_to_pygame(img_cv2):
-    """
-    Convert BGR/BGRA -> pygame Surface
-    """
     if img_cv2 is None:
         return None
     if len(img_cv2.shape) == 3:
@@ -53,7 +82,9 @@ def cv2_to_pygame(img_cv2):
             return pygame.image.frombuffer(img_rgb.tobytes(), img_rgb.shape[1::-1], 'RGB')
     return None
 
-# Set up screen
+###############################################################################
+# PYGAME Setup
+###############################################################################
 screen = pygame.display.set_mode((800, 600), pygame.RESIZABLE)
 pygame.display.set_caption("MAPPIC Viewer")
 
@@ -72,16 +103,18 @@ def bring_window_to_front():
 MAIN_BG_COLOR = (68, 71, 90)
 IMAGE_BG_COLOR = (40, 42, 54)
 
-root = Tk()
-root.withdraw()
-
-# Provide references into tile_system
+###############################################################################
+# Wire up tile_system_view
+###############################################################################
 tile_system.bring_window_to_front = bring_window_to_front
 tile_system.load_image = load_image
 tile_system.cv2_to_pygame = cv2_to_pygame
 tile_system.SQUARE_SIZE = 36
 tile_system.initialize()
 
+###############################################################################
+# UI Manager
+###############################################################################
 manager = pygame_gui.UIManager((screen_width, screen_height))
 
 bottom_bar_height = 60
@@ -105,98 +138,123 @@ load_game_button = pygame_gui.elements.UIButton(
     container=bottom_bar_panel
 )
 
+###############################################################################
+# We keep references to tile_window + the following buttons in top-level variables
+# so that we can reassign them after closing/reopening.
+###############################################################################
+tile_window = None
+tile_window_left_panel = None
+tile_image = None
+sub_button = None
+tile_window_bottom_bar = None
+reset_view_button = None
+maximize_button = None
+
 tile_window_width = tile_system.SQUARE_SIZE * 9
 tile_window_height = tile_system.SQUARE_SIZE * 9
 tile_window_bottom_bar_height = 60
-
-tile_window = pygame_gui.elements.UIWindow(
-    rect=pygame.Rect((screen_width - tile_window_width - 10, 10),
-                     (tile_window_width, tile_window_height + tile_window_bottom_bar_height)),
-    manager=manager,
-    window_display_title="Tile System"
-)
-
 tile_window_left_panel_width = 50
-tile_window_left_panel = pygame_gui.elements.UIPanel(
-    relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, tile_window_height)),
-    manager=manager,
-    container=tile_window
-)
 
-tile_image_width = tile_window_width - tile_window_left_panel_width
-tile_image_surface = pygame.Surface((tile_image_width, tile_window_height), pygame.SRCALPHA)
-tile_image = pygame_gui.elements.UIImage(
-    relative_rect=pygame.Rect((tile_window_left_panel_width, 0), (tile_image_width, tile_window_height)),
-    image_surface=tile_image_surface,
-    manager=manager,
-    container=tile_window
-)
+def create_map_window():
+    """
+    Create the map tile window (and all sub-panels/buttons) at the initial position/size.
+    Store references globally so the event loop can check them.
+    """
+    global tile_window, tile_window_left_panel, tile_image
+    global sub_button, tile_window_bottom_bar
+    global reset_view_button, maximize_button
 
-sub_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, 50)),
-    text=f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}",
-    manager=manager,
-    container=tile_window_left_panel
-)
+    tile_window_rect = pygame.Rect(
+        (screen_width - tile_window_width - 10, 10),
+        (tile_window_width, tile_window_height + tile_window_bottom_bar_height)
+    )
 
-tile_window_bottom_bar = pygame_gui.elements.UIPanel(
-    relative_rect=pygame.Rect((0, tile_window_height), (tile_window_width, tile_window_bottom_bar_height)),
-    manager=manager,
-    container=tile_window
-)
+    tile_window = pygame_gui.elements.UIWindow(
+        rect=tile_window_rect,
+        manager=manager,
+        window_display_title="Tile System",
+        object_id="#tile_window"
+    )
 
-tile_window_button_width = (tile_window_width - 50) // 2
-tile_window_button_height = tile_window_bottom_bar_height - 10
-tile_window_button_padding = 10
+    tile_window_left_panel = pygame_gui.elements.UIPanel(
+        relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, tile_window_height)),
+        manager=manager,
+        container=tile_window,
+        object_id="#tile_window_left_panel"
+    )
 
-reset_view_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((tile_window_button_padding, 5), (tile_window_button_width, tile_window_button_height)),
-    text="Reset View",
-    manager=manager,
-    container=tile_window_bottom_bar
-)
+    tile_image_surf = pygame.Surface((tile_window_width - tile_window_left_panel_width, tile_window_height), pygame.SRCALPHA)
+    tile_image = pygame_gui.elements.UIImage(
+        relative_rect=pygame.Rect((tile_window_left_panel_width, 0),
+                                  (tile_window_width - tile_window_left_panel_width, tile_window_height)),
+        image_surface=tile_image_surf,
+        manager=manager,
+        container=tile_window
+    )
 
-maximize_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((tile_window_button_padding*2 + tile_window_button_width, 5),
-                              (tile_window_button_width, tile_window_button_height)),
-    text="Maximize",
-    manager=manager,
-    container=tile_window_bottom_bar
-)
+    # sub button
+    sub_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, 50)),
+        text=f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}",
+        manager=manager,
+        container=tile_window_left_panel
+    )
 
+    tile_window_bottom_bar = pygame_gui.elements.UIPanel(
+        relative_rect=pygame.Rect((0, tile_window_height), (tile_window_width, tile_window_bottom_bar_height)),
+        manager=manager,
+        container=tile_window,
+        object_id="#tile_window_bottom_bar"
+    )
+
+    tile_window_button_width = (tile_window_width - 50) // 2
+    tile_window_button_height = tile_window_bottom_bar_height - 10
+    tile_window_button_padding = 10
+
+    reset_view_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((tile_window_button_padding, 5), (tile_window_button_width, tile_window_button_height)),
+        text="Reset View",
+        manager=manager,
+        container=tile_window_bottom_bar
+    )
+
+    maximize_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((tile_window_button_padding * 2 + tile_window_button_width, 5),
+                                  (tile_window_button_width, tile_window_button_height)),
+        text="Maximize",
+        manager=manager,
+        container=tile_window_bottom_bar
+    )
+
+
+# Create the map window initially
+create_map_window()
 tile_window_maximized = False
+tile_window_visible = True
+
+###############################################################################
+# MAP VIEW / ZOOM / PANNING
+###############################################################################
 zoom_factor = 1.0
 MIN_ZOOM = 0.5
 MAX_ZOOM = 3.0
 follow_player = True
-running = True
-
-restore_tile_window_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - 50, 10), (40, 40)),
-    text="↓",
-    manager=manager
-)
-
-clock = pygame.time.Clock()
-last_click_time = 0
-DOUBLE_CLICK_TIME = 500
-last_click_pos = None
-
-panning = False
-pan_start_pos = None
 
 def reset_map_view():
     global zoom_factor
-    tile_image_rect = tile_image.get_abs_rect()
+    if tile_image is None:
+        return
+
+    tile_image_rect = tile_image.get_relative_rect()
     scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
     tile_system.map_offset[0] = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_sq
     tile_system.map_offset[1] = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_sq
     print("[view_page] reset_map_view => map_offset updated for player pos")
 
 def adjust_zoom(old_zoom, new_zoom):
-    if follow_player:
+    if follow_player or tile_image is None:
         return
-    tile_image_rect = tile_image.get_abs_rect()
+    tile_image_rect = tile_image.get_relative_rect()
     center_x = tile_image_rect.width / 2
     center_y = tile_image_rect.height / 2
     map_x_before = (center_x - tile_system.map_offset[0]) / (tile_system.SQUARE_SIZE * old_zoom)
@@ -205,15 +263,36 @@ def adjust_zoom(old_zoom, new_zoom):
     tile_system.map_offset[1] = center_y - map_y_before * tile_system.SQUARE_SIZE * new_zoom
 
 ###############################################################################
-# AUTO-LOAD the JSON if we got one from sys.argv
+# RE-LAUNCH BUTTON
+###############################################################################
+restore_tile_window_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((screen_width - 50, 10), (40, 40)),
+    text="↓",
+    manager=manager,
+    object_id="#restore_tile_window_button"
+)
+
+###############################################################################
+# AUTO-LOAD ANY JSON
 ###############################################################################
 if linked_json_to_load and os.path.isfile(linked_json_to_load):
     print(f"[view_page] Auto-loading map => {linked_json_to_load}")
     tile_system.save_current_state_to_history()
     tile_system.load_game_state_from_file(linked_json_to_load)
-    # Optionally reset or zoom:
     zoom_factor = 1.0
     reset_map_view()
+
+###############################################################################
+# MAIN LOOP
+###############################################################################
+running = True
+clock = pygame.time.Clock()
+
+last_click_time = 0
+DOUBLE_CLICK_TIME = 500
+last_click_pos = None
+panning = False
+pan_start_local = None
 
 while running:
     time_delta = clock.tick(60) / 1000.0
@@ -227,114 +306,15 @@ while running:
             screen_width, screen_height = event.w, event.h
             screen = pygame.display.set_mode((screen_width, screen_height), pygame.RESIZABLE)
             manager.set_window_resolution((screen_width, screen_height))
+
             bottom_bar_panel.set_relative_position((0, screen_height - bottom_bar_height))
             bottom_bar_panel.set_dimensions((screen_width, bottom_bar_height))
             restore_tile_window_button.set_relative_position((screen_width - 50, 10))
 
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_LEFT:
-                tile_system.save_current_state_to_history()
-                tile_system.rotate_player(pygame.K_LEFT)
-                print("[view_page] rotate left => direction=", tile_system.player_direction)
-            elif event.key == pygame.K_RIGHT:
-                tile_system.save_current_state_to_history()
-                tile_system.rotate_player(pygame.K_RIGHT)
-                print("[view_page] rotate right => direction=", tile_system.player_direction)
-            elif event.key == pygame.K_UP:
-                tile_system.save_current_state_to_history()
-                tile_system.move_player(forward=True)
-                print("[view_page] move forward => pos=", tile_system.player_pos)
-                if follow_player:
-                    reset_map_view()
-            elif event.key == pygame.K_DOWN:
-                tile_system.save_current_state_to_history()
-                tile_system.move_player(forward=False)
-                print("[view_page] move backward => pos=", tile_system.player_pos)
-                if follow_player:
-                    reset_map_view()
-
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 4:  # wheel up => zoom in
-                old_z = zoom_factor
-                zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
-                adjust_zoom(old_z, zoom_factor)
-            elif event.button == 5:  # wheel down => zoom out
-                old_z = zoom_factor
-                zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
-                adjust_zoom(old_z, zoom_factor)
-            elif event.button == 1:  # left click => tile select/double-click or panning
-                tile_img_rect = tile_image.get_abs_rect()
-                if tile_img_rect.collidepoint(event.pos):
-                    local_x = event.pos[0] - tile_img_rect.left
-                    local_y = event.pos[1] - tile_img_rect.top
-                    current_time = pygame.time.get_ticks()
-
-                    if (last_click_pos
-                        and abs(event.pos[0] - last_click_pos[0]) < 10
-                        and abs(event.pos[1] - last_click_pos[1]) < 10
-                        and (current_time - last_click_time < DOUBLE_CLICK_TIME)):
-
-                        # Double-click => move player to tile
-                        scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
-                        row = int((local_y - tile_system.map_offset[1]) // scaled_sq)
-                        col = int((local_x - tile_system.map_offset[0]) // scaled_sq)
-                        tile_system.save_current_state_to_history()
-                        tile_system.move_player_to_tile(row, col)
-                        print("[view_page] double-click => move player => pos=", tile_system.player_pos)
-                        last_click_time = 0
-                        last_click_pos = None
-                        if follow_player:
-                            reset_map_view()
-                    else:
-                        # Single-click => select tile
-                        scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
-                        row = int((local_y - tile_system.map_offset[1]) // scaled_sq)
-                        col = int((local_x - tile_system.map_offset[0]) // scaled_sq)
-                        tile_system.select_tile(row, col)
-                        print(f"[view_page] single-click => tile({row},{col}) selected")
-                        last_click_time = current_time
-                        last_click_pos = event.pos
-                else:
-                    # Left-click outside tile window => start panning
-                    panning = True
-                    pan_start_pos = event.pos
-                    follow_player = False
-
-        elif event.type == pygame.MOUSEBUTTONUP:
-            if event.button == 1:
-                panning = False
-
-        elif event.type == pygame.MOUSEMOTION:
-            if panning:
-                dx = event.pos[0] - pan_start_pos[0]
-                dy = event.pos[1] - pan_start_pos[1]
-                tile_system.map_offset[0] += dx
-                tile_system.map_offset[1] += dy
-                pan_start_pos = event.pos
-
-        elif event.type == pygame_gui.UI_BUTTON_PRESSED:
-            if event.ui_element == home_button:
-                subprocess.Popen(["python", "home_page.py"])
-                pygame.quit()
-                sys.exit()
-            elif event.ui_element == load_game_button:
-                tile_system.save_current_state_to_history()
-                tile_system.load_game_state()
-                zoom_factor = 1.0
-                reset_map_view()
-                print("[view_page] load_game => loaded => player pos:", tile_system.player_pos)
-
-            elif event.ui_element == reset_view_button:
-                zoom_factor = 1.0
-                reset_map_view()
-                follow_player = True
-
-            elif event.ui_element == maximize_button:
-                tile_window_maximized = not tile_window_maximized
-                if tile_window_maximized:
-                    maximize_button.set_text("Restore")
-                    tile_window.set_relative_position((10, 10))
-                    tile_window.set_dimensions((screen_width - 20, screen_height - bottom_bar_height - 20))
+            if tile_window and tile_window_maximized:
+                tile_window.set_relative_position((10, 10))
+                tile_window.set_dimensions((screen_width - 20, screen_height - bottom_bar_height - 20))
+                if tile_image is not None:
                     new_w = tile_window.get_relative_rect().width
                     new_h = tile_window.get_relative_rect().height - tile_window_bottom_bar_height
                     tile_image.set_dimensions((new_w, new_h))
@@ -342,60 +322,209 @@ while running:
                     tile_image.set_image(tile_image_surf)
                     tile_window_bottom_bar.set_relative_position((0, new_h))
                     tile_window_bottom_bar.set_dimensions((new_w, tile_window_bottom_bar_height))
+
+        # 8-direction movement
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_LEFT:
+                tile_system.save_current_state_to_history()
+                tile_system.rotate_player(pygame.K_LEFT)
+            elif event.key == pygame.K_RIGHT:
+                tile_system.save_current_state_to_history()
+                tile_system.rotate_player(pygame.K_RIGHT)
+            elif event.key == pygame.K_UP:
+                tile_system.save_current_state_to_history()
+                tile_system.move_player(forward=True)
+                if follow_player:
+                    reset_map_view()
+            elif event.key == pygame.K_DOWN:
+                tile_system.save_current_state_to_history()
+                tile_system.move_player(forward=False)
+                if follow_player:
+                    reset_map_view()
+
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 4:  # zoom in
+                old_z = zoom_factor
+                zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
+                adjust_zoom(old_z, zoom_factor)
+            elif event.button == 5:  # zoom out
+                old_z = zoom_factor
+                zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
+                adjust_zoom(old_z, zoom_factor)
+            elif event.button == 1:  # left-click
+                if tile_window and tile_window.visible and tile_image is not None:
+                    tw_abs_rect = tile_window.get_abs_rect()
+                    ti_rel_rect = tile_image.get_relative_rect()
+                    local_x = event.pos[0] - tw_abs_rect.left - ti_rel_rect.left
+                    local_y = event.pos[1] - tw_abs_rect.top - ti_rel_rect.top
+
+                    if 0 <= local_x < ti_rel_rect.width and 0 <= local_y < ti_rel_rect.height:
+                        current_time = pygame.time.get_ticks()
+
+                        # Double-click logic
+                        if (last_click_pos
+                            and abs(event.pos[0] - last_click_pos[0]) < 10
+                            and abs(event.pos[1] - last_click_pos[1]) < 10
+                            and (current_time - last_click_time < DOUBLE_CLICK_TIME)):
+
+                            scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
+                            row = int((local_y - tile_system.map_offset[1]) // scaled_sq)
+                            col = int((local_x - tile_system.map_offset[0]) // scaled_sq)
+                            tile_system.save_current_state_to_history()
+                            tile_system.move_player_to_tile(row, col)
+                            last_click_time = 0
+                            last_click_pos = None
+                            if follow_player:
+                                reset_map_view()
+                        else:
+                            # single-click => select tile
+                            scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
+                            row = int((local_y - tile_system.map_offset[1]) // scaled_sq)
+                            col = int((local_x - tile_system.map_offset[0]) // scaled_sq)
+                            tile_system.select_tile(row, col)
+
+                            last_click_time = pygame.time.get_ticks()
+                            last_click_pos = event.pos
+
+                            # Start panning in local coords
+                            panning = True
+                            pan_start_local = (local_x, local_y)
+                            follow_player = False
+                    else:
+                        # click outside tile_image => maybe pan
+                        panning = True
+                        pan_start_local = (event.pos[0] - tw_abs_rect.left, event.pos[1] - tw_abs_rect.top)
+                        follow_player = False
+
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:
+                panning = False
+                pan_start_local = None
+
+        elif event.type == pygame.MOUSEMOTION:
+            if panning and tile_window and tile_window.visible and tile_image is not None:
+                tw_abs_rect = tile_window.get_abs_rect()
+                ti_rel_rect = tile_image.get_relative_rect()
+                current_local_x = event.pos[0] - tw_abs_rect.left - ti_rel_rect.left
+                current_local_y = event.pos[1] - tw_abs_rect.top - ti_rel_rect.top
+                if pan_start_local is not None:
+                    dx = current_local_x - pan_start_local[0]
+                    dy = current_local_y - pan_start_local[1]
+                    tile_system.map_offset[0] += dx
+                    tile_system.map_offset[1] += dy
+                    pan_start_local = (current_local_x, current_local_y)
+
+        elif event.type == pygame_gui.UI_BUTTON_PRESSED:
+            # ===================================================
+            #           MAIN BOTTOM BAR BUTTONS
+            # ===================================================
+            if event.ui_element == home_button:
+                subprocess.Popen(["python", "home_page.py"])
+                pygame.quit()
+                sys.exit()
+
+            elif event.ui_element == load_game_button:
+                tile_system.save_current_state_to_history()
+                tile_system.load_game_state()
+                zoom_factor = 1.0
+                follow_player = True
+                reset_map_view()
+
+            # ===================================================
+            #           MAP WINDOW BUTTONS
+            # ===================================================
+            elif event.ui_element == sub_button:
+                tile_system.sub_grid_visible = not tile_system.sub_grid_visible
+                sub_button.set_text(f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}")
+
+            elif event.ui_element == reset_view_button:
+                zoom_factor = 1.0
+                follow_player = True
+                reset_map_view()
+
+            elif event.ui_element == maximize_button:
+                tile_window_maximized = not tile_window_maximized
+                if tile_window_maximized and tile_window is not None:
+                    maximize_button.set_text("Restore")
+                    tile_window.set_relative_position((10, 10))
+                    tile_window.set_dimensions((screen_width - 20, screen_height - bottom_bar_height - 20))
+                    if tile_image is not None:
+                        new_w = tile_window.get_relative_rect().width
+                        new_h = tile_window.get_relative_rect().height - tile_window_bottom_bar_height
+                        tile_image.set_dimensions((new_w, new_h))
+                        tile_image_surf = pygame.Surface((new_w, new_h), pygame.SRCALPHA)
+                        tile_image.set_image(tile_image_surf)
+                        tile_window_bottom_bar.set_relative_position((0, new_h))
+                        tile_window_bottom_bar.set_dimensions((new_w, tile_window_bottom_bar_height))
                 else:
                     maximize_button.set_text("Maximize")
-                    tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
-                    tile_window.set_dimensions((tile_window_width, tile_window_height + tile_window_bottom_bar_height))
-                    tile_image.set_dimensions((tile_window_width, tile_window_height))
-                    tile_image_surf = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
-                    tile_image.set_image(tile_image_surf)
-                    tile_window_bottom_bar.set_relative_position((0, tile_window_height))
-                    tile_window_bottom_bar.set_dimensions((tile_window_width, tile_window_bottom_bar_height))
+                    if tile_window is not None:
+                        tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
+                        tile_window.set_dimensions((tile_window_width, tile_window_height + tile_window_bottom_bar_height))
+                        if tile_image is not None:
+                            tile_image.set_dimensions(
+                                (tile_window_width - tile_window_left_panel_width, tile_window_height)
+                            )
+                            tile_image_surf = pygame.Surface(
+                                (tile_window_width - tile_window_left_panel_width, tile_window_height),
+                                pygame.SRCALPHA
+                            )
+                            tile_image.set_image(tile_image_surf)
+                            tile_window_bottom_bar.set_relative_position((0, tile_window_height))
+                            tile_window_bottom_bar.set_dimensions((tile_window_width, tile_window_bottom_bar_height))
 
             elif event.ui_element == restore_tile_window_button:
-                if tile_window:
+                # If tile_window is None, re-create everything
+                if tile_window is None:
+                    create_map_window()  # re-creates tile_window, tile_image, sub_button, etc.
+                    tile_window_maximized = False
+                else:
+                    # If tile_window is not None, just hide/show
                     if tile_window.visible:
                         tile_window.hide()
                     else:
                         tile_window.show()
 
-            elif event.ui_element == sub_button:
-                tile_system.sub_grid_visible = not tile_system.sub_grid_visible
-                sub_button.set_text(f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}")
-
         elif event.type == pygame_gui.UI_WINDOW_CLOSE:
-            if event.ui_element == tile_window:
-                tile_window.hide()
+            if tile_window and event.ui_element == tile_window:
+                tile_window.kill()
+                tile_window = None
+                tile_image = None
+                sub_button = None
+                reset_view_button = None
+                maximize_button = None
+                tile_window_maximized = False
 
         manager.process_events(event)
 
     manager.update(time_delta)
 
-    # Fill main area
+    # Fill main area with a background color
     main_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
     pygame.draw.rect(screen, IMAGE_BG_COLOR, main_area)
 
-    # Tile window update
-    if tile_window and tile_window.visible:
+    # (A) DRAW MAP if tile_window is active
+    if tile_window and tile_window.visible and tile_image is not None:
         tile_image.image.fill((0, 0, 0, 0))
-        tile_img_rect = tile_image.get_abs_rect()
-        local_mouse_pos = pygame.mouse.get_pos()
-        local_mouse_pos = (local_mouse_pos[0] - tile_img_rect.left, local_mouse_pos[1] - tile_img_rect.top)
-        visible_area = pygame.Rect(0, 0, tile_img_rect.width, tile_img_rect.height)
-        scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
 
-        if follow_player:
-            offset_x = tile_img_rect.width // 2 - tile_system.player_pos[1] * scaled_sq
-            offset_y = tile_img_rect.height // 2 - tile_system.player_pos[0] * scaled_sq
-        else:
-            offset_x, offset_y = tile_system.map_offset
-
-        tile_system.draw_board(local_mouse_pos, offset_x, offset_y,
-                               tile_image.image, visible_area, zoom_factor)
-        tile_system.draw_player(offset_x, offset_y, tile_image.image, zoom_factor)
+        tile_system.draw_board(
+            (0, 0),
+            tile_system.map_offset[0],
+            tile_system.map_offset[1],
+            tile_image.image,
+            tile_image.get_relative_rect(),
+            zoom_factor
+        )
+        tile_system.draw_player(
+            tile_system.map_offset[0],
+            tile_system.map_offset[1],
+            tile_image.image,
+            zoom_factor
+        )
+        tile_image_surface = tile_image.image
         tile_image_surface.blit(tile_image.image, (0, 0))
 
-    # Display current tile's image in main area
+    # (B) DRAW CURRENT TILE’S IMAGE in main area
     current_tile = tile_system.get_current_tile()
     if current_tile and current_tile.image_filenames:
         img_cv2 = current_tile.get_current_image(tile_system.current_image_index)
