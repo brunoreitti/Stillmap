@@ -111,6 +111,8 @@ tile_system.load_image = load_image
 tile_system.cv2_to_pygame = cv2_to_pygame
 tile_system.SQUARE_SIZE = 36
 tile_system.initialize()
+# Hide subgrid drawing and its UI functionality
+tile_system.sub_grid_visible = False
 
 ###############################################################################
 # UI Manager
@@ -143,9 +145,7 @@ load_game_button = pygame_gui.elements.UIButton(
 # so that we can reassign them after closing/reopening.
 ###############################################################################
 tile_window = None
-tile_window_left_panel = None
 tile_image = None
-sub_button = None
 tile_window_bottom_bar = None
 reset_view_button = None
 maximize_button = None
@@ -153,16 +153,14 @@ maximize_button = None
 tile_window_width = tile_system.SQUARE_SIZE * 9
 tile_window_height = tile_system.SQUARE_SIZE * 9
 tile_window_bottom_bar_height = 60
-tile_window_left_panel_width = 50
 
 def create_map_window():
     """
-    Create the map tile window (and all sub-panels/buttons) at the initial position/size.
+    Create the map tile window (and its bottom bar) at the initial position/size.
     Store references globally so the event loop can check them.
     """
-    global tile_window, tile_window_left_panel, tile_image
-    global sub_button, tile_window_bottom_bar
-    global reset_view_button, maximize_button
+    global tile_window, tile_image
+    global tile_window_bottom_bar, reset_view_button, maximize_button
 
     tile_window_rect = pygame.Rect(
         (screen_width - tile_window_width - 10, 10),
@@ -176,28 +174,13 @@ def create_map_window():
         object_id="#tile_window"
     )
 
-    tile_window_left_panel = pygame_gui.elements.UIPanel(
-        relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, tile_window_height)),
-        manager=manager,
-        container=tile_window,
-        object_id="#tile_window_left_panel"
-    )
-
-    tile_image_surf = pygame.Surface((tile_window_width - tile_window_left_panel_width, tile_window_height), pygame.SRCALPHA)
+    # Create tile image filling the entire window (no left panel)
+    tile_image_surf = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
     tile_image = pygame_gui.elements.UIImage(
-        relative_rect=pygame.Rect((tile_window_left_panel_width, 0),
-                                  (tile_window_width - tile_window_left_panel_width, tile_window_height)),
+        relative_rect=pygame.Rect((0, 0), (tile_window_width, tile_window_height)),
         image_surface=tile_image_surf,
         manager=manager,
         container=tile_window
-    )
-
-    # sub button
-    sub_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, 50)),
-        text=f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}",
-        manager=manager,
-        container=tile_window_left_panel
     )
 
     tile_window_bottom_bar = pygame_gui.elements.UIPanel(
@@ -225,7 +208,6 @@ def create_map_window():
         manager=manager,
         container=tile_window_bottom_bar
     )
-
 
 # Create the map window initially
 create_map_window()
@@ -377,7 +359,7 @@ while running:
                             if follow_player:
                                 reset_map_view()
                         else:
-                            # single-click => select tile
+                            # Single-click => select tile and start panning within tile_image area
                             scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
                             row = int((local_y - tile_system.map_offset[1]) // scaled_sq)
                             col = int((local_x - tile_system.map_offset[0]) // scaled_sq)
@@ -386,15 +368,13 @@ while running:
                             last_click_time = pygame.time.get_ticks()
                             last_click_pos = event.pos
 
-                            # Start panning in local coords
+                            # Start panning in local coordinates (only if click is inside the tile image)
                             panning = True
                             pan_start_local = (local_x, local_y)
                             follow_player = False
                     else:
-                        # click outside tile_image => maybe pan
-                        panning = True
-                        pan_start_local = (event.pos[0] - tw_abs_rect.left, event.pos[1] - tw_abs_rect.top)
-                        follow_player = False
+                        # Do nothing if the click is outside the tile_image area.
+                        pass
 
         elif event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
@@ -433,10 +413,6 @@ while running:
             # ===================================================
             #           MAP WINDOW BUTTONS
             # ===================================================
-            elif event.ui_element == sub_button:
-                tile_system.sub_grid_visible = not tile_system.sub_grid_visible
-                sub_button.set_text(f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}")
-
             elif event.ui_element == reset_view_button:
                 zoom_factor = 1.0
                 follow_player = True
@@ -462,24 +438,17 @@ while running:
                         tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
                         tile_window.set_dimensions((tile_window_width, tile_window_height + tile_window_bottom_bar_height))
                         if tile_image is not None:
-                            tile_image.set_dimensions(
-                                (tile_window_width - tile_window_left_panel_width, tile_window_height)
-                            )
-                            tile_image_surf = pygame.Surface(
-                                (tile_window_width - tile_window_left_panel_width, tile_window_height),
-                                pygame.SRCALPHA
-                            )
+                            tile_image.set_dimensions((tile_window_width, tile_window_height))
+                            tile_image_surf = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
                             tile_image.set_image(tile_image_surf)
                             tile_window_bottom_bar.set_relative_position((0, tile_window_height))
                             tile_window_bottom_bar.set_dimensions((tile_window_width, tile_window_bottom_bar_height))
 
             elif event.ui_element == restore_tile_window_button:
-                # If tile_window is None, re-create everything
                 if tile_window is None:
-                    create_map_window()  # re-creates tile_window, tile_image, sub_button, etc.
+                    create_map_window()
                     tile_window_maximized = False
                 else:
-                    # If tile_window is not None, just hide/show
                     if tile_window.visible:
                         tile_window.hide()
                     else:
@@ -490,7 +459,6 @@ while running:
                 tile_window.kill()
                 tile_window = None
                 tile_image = None
-                sub_button = None
                 reset_view_button = None
                 maximize_button = None
                 tile_window_maximized = False
