@@ -25,7 +25,8 @@ save_directory = "saves"
 
 map_offset = [0, 0]
 selected_tile = None
-sub_grid_visible = True
+# Set default to False to hide subgrid drawing
+sub_grid_visible = False
 
 background_image = None
 background_image_path = None
@@ -186,7 +187,6 @@ def draw_board(mouse_pos, offset_x, offset_y, surface, visible_area, zoom_factor
         bg_w = background_image.get_width() * zoom_factor
         bg_h = background_image.get_height() * zoom_factor
         scaled_bg = pygame.transform.smoothscale(background_image, (int(bg_w), int(bg_h)))
-        # Draw it at (offset_x, offset_y), same approach as tile_system.py
         surface.blit(scaled_bg, (offset_x, offset_y))
 
     for key, tile_obj in tiles.items():
@@ -493,7 +493,7 @@ def load_game_state_from_dict(game_state):
     try:
         player_pos[:] = game_state["player_position"]
         player_direction = game_state["player_direction"]
-        sub_grid_visible = game_state.get("grid_visible", True)
+        sub_grid_visible = game_state.get("grid_visible", False)
         map_offset[:] = game_state.get("map_offset", [0, 0])
         background_image_path = game_state.get("background_image_path", None)
 
