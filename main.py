@@ -113,19 +113,11 @@ root = Tk()
 root.withdraw()
 
 def open_file_explorer():
-    directory = filedialog.askdirectory()
-    return directory
+    return filedialog.askdirectory()
 
 def open_image_file_explorer():
-    filetypes = (
-        ('Supported files', '*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.pdf;*.svg'),
-        ('All files', '*.*')
-    )
-    filename = filedialog.askopenfilename(
-        title='Open an image',
-        initialdir=os.getcwd(),
-        filetypes=filetypes)
-    return filename
+    filetypes = (('Supported files', '*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.pdf;*.svg'), ('All files', '*.*'))
+    return filedialog.askopenfilename(title='Open an image', initialdir=os.getcwd(), filetypes=filetypes)
 
 def load_image_viewing_link_areas():
     global image_viewing_link_areas
@@ -146,10 +138,7 @@ def load_image_viewing_link_areas():
 
 def save_image_viewing_link_areas():
     link_areas_file = os.path.join(image_viewing_directory, 'link_areas.json')
-    data = {}
-    for image_path, areas in image_viewing_link_areas.items():
-        image_name = os.path.basename(image_path)
-        data[image_name] = areas
+    data = {os.path.basename(image_path): areas for image_path, areas in image_viewing_link_areas.items()}
     try:
         with open(link_areas_file, 'w') as f:
             json.dump(data, f, indent=4)
@@ -182,26 +171,26 @@ button_width = (screen_width - (num_buttons + 1) * button_padding) // num_button
 
 buttons = []
 for i, text in enumerate(button_texts):
-    button = pygame_gui.elements.UIButton(
+    buttons.append(pygame_gui.elements.UIButton(
         relative_rect=pygame.Rect((button_padding + i * (button_width + button_padding),
                                    (bottom_bar_height - button_height) // 2),
                                   (button_width, button_height)),
         text=text,
         manager=manager,
         container=bottom_bar_panel
-    )
-    buttons.append(button)
-
+    ))
 (load_button, save_button, edit_button, image_button, delete_button,
  json_link_button, clear_json_link_button, add_link_area_button, assign_link_folder_button,
  assign_json_area_button, show_links_button) = buttons
 
+# --- Create the Tile System Window ---
 tile_window_width = SQUARE_SIZE * 9
 tile_window_height = SQUARE_SIZE * 9
 tile_window_bottom_bar_height = 60
 
 tile_window = pygame_gui.elements.UIWindow(
-    rect=pygame.Rect((screen_width - tile_window_width - 10, 10), (tile_window_width, tile_window_height + tile_window_bottom_bar_height)),
+    rect=pygame.Rect((screen_width - tile_window_width - 10, 10),
+                     (tile_window_width, tile_window_height + tile_window_bottom_bar_height)),
     manager=manager,
     window_display_title="Tile System",
     object_id="#tile_window"
@@ -224,9 +213,16 @@ tile_image = pygame_gui.elements.UIImage(
     container=tile_window
 )
 
+# Create the left-panel buttons.
 sub_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((0, 0), (tile_window_left_panel_width, 50)),
     text=f"Sub: {'ON' if tile_system.sub_grid_visible else 'OFF'}",
+    manager=manager,
+    container=tile_window_left_panel
+)
+size_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((0, 50), (tile_window_left_panel_width, 50)),
+    text=f"Size: {'ON' if tile_system.bg_resize_mode else 'OFF'}",
     manager=manager,
     container=tile_window_left_panel
 )
@@ -243,28 +239,32 @@ tile_window_button_height = tile_window_bottom_bar_height - 10
 tile_window_button_padding = 10
 
 add_tile_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((tile_window_button_padding, 5), (tile_window_button_width, tile_window_button_height)),
+    relative_rect=pygame.Rect((tile_window_button_padding, 5),
+                              (tile_window_button_width, tile_window_button_height)),
     text="Add: OFF",
     manager=manager,
     container=tile_window_bottom_bar
 )
 
 reset_zoom_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((tile_window_button_padding * 2 + tile_window_button_width, 5), (tile_window_button_width, tile_window_button_height)),
+    relative_rect=pygame.Rect((tile_window_button_padding * 2 + tile_window_button_width, 5),
+                              (tile_window_button_width, tile_window_button_height)),
     text="Reset View",
     manager=manager,
     container=tile_window_bottom_bar
 )
 
 maximize_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((tile_window_button_padding * 3 + tile_window_button_width * 2, 5), (tile_window_button_width, tile_window_button_height)),
+    relative_rect=pygame.Rect((tile_window_button_padding * 3 + tile_window_button_width * 2, 5),
+                              (tile_window_button_width, tile_window_button_height)),
     text="Maximize",
     manager=manager,
     container=tile_window_bottom_bar
 )
 
 set_bg_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((tile_window_button_padding * 4 + tile_window_button_width * 3, 5), (tile_window_button_width, tile_window_button_height)),
+    relative_rect=pygame.Rect((tile_window_button_padding * 4 + tile_window_button_width * 3, 5),
+                              (tile_window_button_width, tile_window_button_height)),
     text="Set BG",
     manager=manager,
     container=tile_window_bottom_bar
@@ -290,6 +290,13 @@ home_button = pygame_gui.elements.UIButton(
     object_id="#home_button"
 )
 
+# Variables for dragging:
+panning = False
+pan_start_local = None
+right_dragging = False
+right_pan_start_local = None
+
+# Other variables:
 drawing_link_area = False
 link_area_start_pos = None
 link_area_rect = None
@@ -303,8 +310,8 @@ assign_json_area_mode = False
 show_link_areas = False
 link_area_mode = False
 image_viewing_link_areas = {}
+# IMPORTANT: add_tile_mode controls whether left-click will add/delete a tile.
 add_tile_mode = False
-panning = False
 pan_start_pos = None
 last_click_time = 0
 DOUBLE_CLICK_TIME = 500
@@ -414,43 +421,68 @@ while running:
                 elif event.key == pygame.K_RIGHT:
                     image_viewing_index = (image_viewing_index + 1) % len(image_viewing_images)
             else:
-                if event.key == pygame.K_e:
-                    tile_system.toggle_edit_mode()
-                    edit_button.set_text(f"Edit Mode: {'ON' if tile_system.edit_mode else 'OFF'}")
-                elif event.key == pygame.K_j:
-                    tile_system.toggle_json_link_mode()
-                    json_link_button.set_text(f"Manage JSON Links: {'ON' if tile_system.json_link_mode else 'OFF'}")
-                elif event.key == pygame.K_c:
-                    tile_system.toggle_clear_json_link_mode()
-                    clear_json_link_button.set_text(f"Clear JSON Links: {'ON' if tile_system.clear_json_link_mode else 'OFF'}")
-                elif event.key == pygame.K_UP:
-                    tile_system.save_current_state_to_history()
-                    tile_system.move_player(forward=True)
-                elif event.key == pygame.K_DOWN:
-                    tile_system.save_current_state_to_history()
-                    tile_system.move_player(forward=False)
-                elif event.key in [pygame.K_LEFT, pygame.K_RIGHT]:
-                    tile_system.save_current_state_to_history()
-                    tile_system.rotate_player(event.key)
+                if tile_system.bg_resize_mode:
+                    if event.key == pygame.K_UP:
+                        tile_system.bg_offset[1] -= 10
+                    elif event.key == pygame.K_DOWN:
+                        tile_system.bg_offset[1] += 10
+                else:
+                    if event.key == pygame.K_e:
+                        tile_system.toggle_edit_mode()
+                        edit_button.set_text(f"Edit Mode: {'ON' if tile_system.edit_mode else 'OFF'}")
+                    elif event.key == pygame.K_j:
+                        tile_system.toggle_json_link_mode()
+                        json_link_button.set_text(f"Manage JSON Links: {'ON' if tile_system.json_link_mode else 'OFF'}")
+                    elif event.key == pygame.K_c:
+                        tile_system.toggle_clear_json_link_mode()
+                        clear_json_link_button.set_text(f"Clear JSON Links: {'ON' if tile_system.clear_json_link_mode else 'OFF'}")
+                    elif event.key == pygame.K_UP:
+                        tile_system.save_current_state_to_history()
+                        tile_system.move_player(forward=True)
+                    elif event.key == pygame.K_DOWN:
+                        tile_system.save_current_state_to_history()
+                        tile_system.move_player(forward=False)
+                    elif event.key in [pygame.K_LEFT, pygame.K_RIGHT]:
+                        tile_system.save_current_state_to_history()
+                        tile_system.rotate_player(event.key)
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 4:
-                old_zoom = zoom_factor
-                zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
-                adjust_zoom(old_zoom, zoom_factor)
+                if tile_system.bg_resize_mode:
+                    old_scale = tile_system.bg_scale
+                    new_scale = min(old_scale + 0.1, 5.0)
+                    rect = tile_image.get_relative_rect()
+                    P_x = rect.width / 2
+                    P_y = rect.height / 2
+                    old_offset = tile_system.bg_offset
+                    new_offset_x = P_x - (P_x - old_offset[0]) * (new_scale / old_scale)
+                    new_offset_y = P_y - (P_y - old_offset[1]) * (new_scale / old_scale)
+                    tile_system.bg_scale = new_scale
+                    tile_system.bg_offset = [new_offset_x, new_offset_y]
+                else:
+                    old_zoom = zoom_factor
+                    zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
+                    adjust_zoom(old_zoom, zoom_factor)
             elif event.button == 5:
-                old_zoom = zoom_factor
-                zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
-                adjust_zoom(old_zoom, zoom_factor)
-            elif image_viewing_mode:
-                if 'image_rect' in locals() and image_rect.collidepoint(event.pos):
-                    if (link_area_mode or assign_link_folder_mode or assign_json_area_mode) and event.button == 1:
-                        link_area_start_pos = event.pos
-                        drawing_link_area = True
-            else:
-                if tile_window is not None:
-                    tile_window_rect = tile_window.get_abs_rect()
-                    tile_image_rect = tile_image.get_abs_rect()
-                    if tile_image_rect.collidepoint(event.pos):
+                if tile_system.bg_resize_mode:
+                    old_scale = tile_system.bg_scale
+                    new_scale = max(old_scale - 0.1, 0.1)
+                    rect = tile_image.get_relative_rect()
+                    P_x = rect.width / 2
+                    P_y = rect.height / 2
+                    old_offset = tile_system.bg_offset
+                    new_offset_x = P_x - (P_x - old_offset[0]) * (new_scale / old_scale)
+                    new_offset_y = P_y - (P_y - old_offset[1]) * (new_scale / old_scale)
+                    tile_system.bg_scale = new_scale
+                    tile_system.bg_offset = [new_offset_x, new_offset_y]
+                else:
+                    old_zoom = zoom_factor
+                    zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
+                    adjust_zoom(old_zoom, zoom_factor)
+            elif event.button == 1:
+                # If add_tile_mode is active, that branch takes precedence.
+                if add_tile_mode:
+                    if tile_window and tile_window.visible and tile_image is not None:
+                        tile_image_rect = tile_image.get_abs_rect()
                         local_pos = (event.pos[0] - tile_image_rect.left, event.pos[1] - tile_image_rect.top)
                         scaled_square_size = SQUARE_SIZE * zoom_factor
                         if follow_player:
@@ -461,158 +493,180 @@ while running:
                             offset_y = tile_system.map_offset[1]
                         tile_col = int((local_pos[0] - offset_x) // scaled_square_size)
                         tile_row = int((local_pos[1] - offset_y) // scaled_square_size)
-
-                        if event.button == 1:
-                            if tile_system.sub_grid_visible:
-                                tile, subgrid_pos = tile_system.get_subgrid_square_at_pixel(local_pos[0], local_pos[1], offset_x, offset_y, zoom_factor)
-                                if tile and subgrid_pos:
-                                    sub_row, sub_col = subgrid_pos
-                                    if tile.subgrid_occupied[sub_row][sub_col]:
-                                        current_time = pygame.time.get_ticks()
-                                        if last_click_time and (current_time - last_click_time) < DOUBLE_CLICK_TIME:
-                                            vector = tile_system.find_vector_with_end_point(tile, (sub_row, sub_col))
-                                            if vector:
-                                                vector_drawing = True
-                                                current_vector_line = vector
-                                                tile.set_subgrid_square_occupied(sub_row, sub_col, False)
-                                                vector.end_tile = None
-                                                vector.end_subgrid_pos = None
-                                                vector.is_complete = False
-                                                last_click_time = 0
-                                        else:
-                                            last_click_time = current_time
-                                            last_click_pos = event.pos
-                                    else:
-                                        if not vector_drawing:
-                                            vector_drawing = True
-                                            current_vector_line = tile_system.VectorLine(tile, (sub_row, sub_col))
-                                            tile.set_subgrid_square_occupied(sub_row, sub_col, True)
-                                        else:
-                                            if current_vector_line.start_tile != tile:
-                                                current_vector_line.end_tile = tile
-                                                current_vector_line.end_subgrid_pos = (sub_row, sub_col)
-                                                current_vector_line.is_complete = True
-                                                vector_drawing = False
-                                                tile.set_subgrid_square_occupied(sub_row, sub_col, True)
-                                                tile_system.vector_lines.append(current_vector_line)
-                                                current_vector_line = None
-                                            else:
-                                                messagebox.showwarning("Invalid Connection", "Cannot create a vector within the same tile.")
-                                                bring_window_to_front()
-                            elif add_tile_mode:
-                                tile = tile_system.get_tile(tile_row, tile_col)
-                                if tile:
-                                    if not tile.directory:
-                                        tile_system.delete_tile(tile_row, tile_col)
-                                        print(f"Deleted empty tile at ({tile_row}, {tile_col})")
-                                    else:
-                                        confirm = messagebox.askyesno("Delete Tile", "This tile has images, are you sure you want to delete it?")
-                                        bring_window_to_front()
-                                        if confirm:
-                                            tile_system.delete_tile(tile_row, tile_col)
-                                            print(f"Deleted tile with images at ({tile_row}, {tile_col})")
-                                        else:
-                                            print("Tile deletion canceled")
-                                else:
-                                    tile_system.create_tile(tile_row, tile_col)
-                                    print(f"Created tile at ({tile_row}, {tile_col})")
-                            elif move_tile_mode:
-                                if tile_system.selected_tile is None:
-                                    tile_system.select_tile(tile_row, tile_col)
-                                else:
-                                    tile_system.move_selected_tile_to(tile_row, tile_col)
-                                    tile_system.deselect_tile()
+                        tile = tile_system.get_tile(tile_row, tile_col)
+                        if tile:
+                            if not tile.directory:
+                                tile_system.delete_tile(tile_row, tile_col)
+                                print(f"Deleted empty tile at ({tile_row}, {tile_col})")
                             else:
-                                current_time = pygame.time.get_ticks()
-                                if last_click_time and (current_time - last_click_time) < DOUBLE_CLICK_TIME:
-                                    if last_click_pos and (abs(event.pos[0] - last_click_pos[0]) < 10) and (abs(event.pos[1] - last_click_pos[1]) < 10):
-                                        tile_system.move_player_to_tile(tile_row, tile_col)
-                                        last_click_time = 0
-                                        if follow_player:
-                                            reset_map_view()
+                                confirm = messagebox.askyesno("Delete Tile", "This tile has images, are you sure you want to delete it?")
+                                bring_window_to_front()
+                                if confirm:
+                                    tile_system.delete_tile(tile_row, tile_col)
+                                    print(f"Deleted tile with images at ({tile_row}, {tile_col})")
+                                else:
+                                    print("Tile deletion canceled")
+                        else:
+                            tile_system.create_tile(tile_row, tile_col)
+                            print(f"Created tile at ({tile_row}, {tile_col})")
+                else:
+                    if tile_window and tile_window.visible and tile_image is not None:
+                        tile_image_rect = tile_image.get_abs_rect()
+                        local_pos = (event.pos[0] - tile_image_rect.left, event.pos[1] - tile_image_rect.top)
+                        scaled_square_size = SQUARE_SIZE * zoom_factor
+                        if follow_player:
+                            offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
+                            offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
+                        else:
+                            offset_x = tile_system.map_offset[0]
+                            offset_y = tile_system.map_offset[1]
+                        tile_col = int((local_pos[0] - offset_x) // scaled_square_size)
+                        tile_row = int((local_pos[1] - offset_y) // scaled_square_size)
+                        if tile_system.sub_grid_visible:
+                            tile, subgrid_pos = tile_system.get_subgrid_square_at_pixel(local_pos[0], local_pos[1], offset_x, offset_y, zoom_factor)
+                            if tile and subgrid_pos:
+                                sub_row, sub_col = subgrid_pos
+                                if tile.subgrid_occupied[sub_row][sub_col]:
+                                    current_time = pygame.time.get_ticks()
+                                    if last_click_time and (current_time - last_click_time) < DOUBLE_CLICK_TIME:
+                                        vector = tile_system.find_vector_with_end_point(tile, (sub_row, sub_col))
+                                        if vector:
+                                            vector_drawing = True
+                                            current_vector_line = vector
+                                            tile.set_subgrid_square_occupied(sub_row, sub_col, False)
+                                            vector.end_tile = None
+                                            vector.end_subgrid_pos = None
+                                            vector.is_complete = False
+                                            last_click_time = 0
                                     else:
                                         last_click_time = current_time
                                         last_click_pos = event.pos
                                 else:
+                                    if not vector_drawing:
+                                        vector_drawing = True
+                                        current_vector_line = tile_system.VectorLine(tile, (sub_row, sub_col))
+                                        tile.set_subgrid_square_occupied(sub_row, sub_col, True)
+                                    else:
+                                        if current_vector_line.start_tile != tile:
+                                            current_vector_line.end_tile = tile
+                                            current_vector_line.end_subgrid_pos = (sub_row, sub_col)
+                                            current_vector_line.is_complete = True
+                                            vector_drawing = False
+                                            tile.set_subgrid_square_occupied(sub_row, sub_col, True)
+                                            tile_system.vector_lines.append(current_vector_line)
+                                            current_vector_line = None
+                                        else:
+                                            messagebox.showwarning("Invalid Connection", "Cannot create a vector within the same tile.")
+                                            bring_window_to_front()
+                        else:
+                            current_time = pygame.time.get_ticks()
+                            if last_click_time and (current_time - last_click_time) < DOUBLE_CLICK_TIME:
+                                if last_click_pos and (abs(event.pos[0] - last_click_pos[0]) < 10) and (abs(event.pos[1] - last_click_pos[1]) < 10):
+                                    tile_system.move_player_to_tile(tile_row, tile_col)
+                                    last_click_time = 0
+                                    if follow_player:
+                                        reset_map_view()
+                                else:
                                     last_click_time = current_time
                                     last_click_pos = event.pos
-                                    panning = True
-                                    pan_start_pos = event.pos
-                                    follow_player = False
-                        elif event.button == 3:
-                            if not add_tile_mode:
-                                tile = tile_system.get_tile(tile_row, tile_col)
-                                if tile:
-                                    if tile_system.edit_mode:
-                                        tile.toggle_active()
-                                    elif tile_system.json_link_mode:
-                                        selected_file = filedialog.askopenfilename(
-                                            title="Select a JSON file",
-                                            initialdir=tile_system.save_directory,
-                                            filetypes=[("JSON files", "*.json")]
-                                        )
-                                        if selected_file:
-                                            tile.set_json_file(selected_file)
-                                    elif tile_system.clear_json_link_mode:
-                                        tile.clear_json_file()
-                                    else:
-                                        directory = open_file_explorer()
-                                        if directory:
-                                            tile.set_directory(directory)
-                                            bring_window_to_front()
-                                else:
-                                    print(f"No tile exists at position ({tile_row}, {tile_col}).")
-                    if event.button == 1 and not tile_window.get_abs_rect().collidepoint(event.pos):
+                            else:
+                                last_click_time = current_time
+                                last_click_pos = event.pos
+                                panning = True
+                                pan_start_pos = event.pos
+                                follow_player = False
+                    # Only check for a click outside tile_window if tile_window exists.
+                    elif event.button == 1 and tile_window is not None and not tile_window.get_abs_rect().collidepoint(event.pos):
                         if not add_tile_mode:
                             panning = True
                             pan_start_pos = event.pos
                             follow_player = False
-        elif event.type == pygame.MOUSEBUTTONUP:
-            if drawing_link_area and event.button == 1:
-                drawing_link_area = False
-                if link_area_rect is not None:
-                    link_area_rect = link_area_rect.clip(image_rect)
-                    img_x0, img_y0 = image_rect.topleft
-                    img_width, img_height = image_rect.size
-                    rel_x0 = (link_area_rect.left - img_x0) / img_width
-                    rel_y0 = (link_area_rect.top - img_y0) / img_height
-                    rel_x1 = (link_area_rect.right - img_x0) / img_width
-                    rel_y1 = (link_area_rect.bottom - img_y0) / img_height
-                    if image_viewing_mode:
-                        image_path = image_viewing_images[image_viewing_index]
-                        if image_path not in image_viewing_link_areas:
-                            image_viewing_link_areas[image_path] = []
-                        area = {'coords': [rel_x0, rel_y0, rel_x1, rel_y1], 'link': None, 'json': None}
-                        image_viewing_link_areas[image_path].append(area)
-                        print(f"Added link area to image {image_path}: {area}")
+            elif event.button == 3:
+                if tile_window and tile_window.visible and tile_image is not None:
+                    tile_image_rect = tile_image.get_abs_rect()
+                    local_pos = (event.pos[0] - tile_image_rect.left, event.pos[1] - tile_image_rect.top)
+                    scaled_square_size = SQUARE_SIZE * zoom_factor
+                    if follow_player:
+                        offset_x = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_square_size
+                        offset_y = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_square_size
                     else:
-                        current_tile = tile_system.get_current_tile()
-                        if current_tile:
-                            image_index = tile_system.current_image_index
-                            area = {'coords': [rel_x0, rel_y0, rel_x1, rel_y1], 'link': None, 'json': None}
-                            current_tile.add_link_area(image_index, area)
+                        offset_x = tile_system.map_offset[0]
+                        offset_y = tile_system.map_offset[1]
+                    tile_col = int((local_pos[0] - offset_x) // scaled_square_size)
+                    tile_row = int((local_pos[1] - offset_y) // scaled_square_size)
+                    if not add_tile_mode:
+                        tile = tile_system.get_tile(tile_row, tile_col)
+                        if tile:
+                            if tile_system.edit_mode:
+                                tile.toggle_active()
+                            elif tile_system.json_link_mode:
+                                selected_file = filedialog.askopenfilename(
+                                    title="Select a JSON file",
+                                    initialdir=tile_system.save_directory,
+                                    filetypes=[("JSON files", "*.json")]
+                                )
+                                if selected_file:
+                                    tile.set_json_file(selected_file)
+                            elif tile_system.clear_json_link_mode:
+                                tile.clear_json_file()
+                            else:
+                                directory = open_file_explorer()
+                                if directory:
+                                    tile.set_directory(directory)
+                                    bring_window_to_front()
                         else:
-                            print("No current tile to add link area.")
-                    link_area_rect = None
-                    link_area_start_pos = None
-            elif drawing_link_area:
-                drawing_link_area = False
-                link_area_rect = None
-            elif event.button == 1 and panning:
+                            print(f"No tile exists at position ({tile_row}, {tile_col}).")
+                    else:
+                        tile = tile_system.get_tile(tile_row, tile_col)
+                        if tile:
+                            if not tile.directory:
+                                tile_system.delete_tile(tile_row, tile_col)
+                                print(f"Deleted empty tile at ({tile_row}, {tile_col})")
+                            else:
+                                confirm = messagebox.askyesno("Delete Tile", "This tile has images, are you sure you want to delete it?")
+                                bring_window_to_front()
+                                if confirm:
+                                    tile_system.delete_tile(tile_row, tile_col)
+                                    print(f"Deleted tile with images at ({tile_row}, {tile_col})")
+                                else:
+                                    print("Tile deletion canceled")
+                        else:
+                            tile_system.create_tile(tile_row, tile_col)
+                            print(f"Created tile at ({tile_row}, {tile_col})")
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:
                 panning = False
+                pan_start_local = None
+            elif event.button == 3:
+                right_dragging = False
+                right_pan_start_local = None
         elif event.type == pygame.MOUSEMOTION:
-            if drawing_link_area:
-                x0, y0 = link_area_start_pos
-                x1, y1 = event.pos
-                link_area_rect = pygame.Rect(min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
-            elif panning:
-                dx = event.pos[0] - pan_start_pos[0]
-                dy = event.pos[1] - pan_start_pos[1]
-                tile_system.map_offset[0] += dx
-                tile_system.map_offset[1] += dy
-                pan_start_pos = event.pos
-            elif vector_drawing and current_vector_line:
-                pass
+            if right_dragging and tile_window and tile_window.visible and tile_image is not None:
+                tile_image_rect = tile_image.get_abs_rect()
+                current_local_x = event.pos[0] - tile_image_rect.left
+                current_local_y = event.pos[1] - tile_image_rect.top
+                if right_pan_start_local is not None:
+                    dx = current_local_x - right_pan_start_local[0]
+                    dy = current_local_y - right_pan_start_local[1]
+                    tile_system.map_offset[0] += dx
+                    tile_system.map_offset[1] += dy
+                    tile_system.bg_offset[0] += dx
+                    tile_system.bg_offset[1] += dy
+                    right_pan_start_local = (current_local_x, current_local_y)
+            elif panning and tile_window and tile_window.visible and tile_image is not None:
+                tile_image_rect = tile_image.get_abs_rect()
+                current_local_x = event.pos[0] - tile_image_rect.left
+                current_local_y = event.pos[1] - tile_image_rect.top
+                if pan_start_local is not None:
+                    dx = current_local_x - pan_start_local[0]
+                    dy = current_local_y - pan_start_local[1]
+                    if tile_system.bg_resize_mode:
+                        tile_system.bg_offset[0] += dx
+                        tile_system.bg_offset[1] += dy
+                    else:
+                        tile_system.map_offset[0] += dx
+                        tile_system.map_offset[1] += dy
+                    pan_start_local = (current_local_x, current_local_y)
         elif event.type == pygame_gui.UI_BUTTON_PRESSED:
             if event.ui_element == load_button:
                 tile_system.save_current_state_to_history()
@@ -765,7 +819,8 @@ while running:
             elif event.ui_element == restore_tile_window_button:
                 if tile_window is None:
                     tile_window = pygame_gui.elements.UIWindow(
-                        rect=pygame.Rect((screen_width - tile_window_width - 10, 10), (tile_window_width, tile_window_height + tile_window_bottom_bar_height)),
+                        rect=pygame.Rect((screen_width - tile_window_width - 10, 10),
+                                         (tile_window_width, tile_window_height + tile_window_bottom_bar_height)),
                         manager=manager,
                         window_display_title="Tile System",
                         object_id="#tile_window"
@@ -798,25 +853,29 @@ while running:
                         object_id="#tile_window_bottom_bar"
                     )
                     add_tile_button = pygame_gui.elements.UIButton(
-                        relative_rect=pygame.Rect((tile_window_button_padding, 5), (tile_window_button_width, tile_window_button_height)),
+                        relative_rect=pygame.Rect((tile_window_button_padding, 5),
+                                                  (tile_window_button_width, tile_window_button_height)),
                         text="Add: OFF",
                         manager=manager,
                         container=tile_window_bottom_bar
                     )
                     reset_zoom_button = pygame_gui.elements.UIButton(
-                        relative_rect=pygame.Rect((tile_window_button_padding * 2 + tile_window_button_width, 5), (tile_window_button_width, tile_window_button_height)),
+                        relative_rect=pygame.Rect((tile_window_button_padding * 2 + tile_window_button_width, 5),
+                                                  (tile_window_button_width, tile_window_button_height)),
                         text="Reset View",
                         manager=manager,
                         container=tile_window_bottom_bar
                     )
                     maximize_button = pygame_gui.elements.UIButton(
-                        relative_rect=pygame.Rect((tile_window_button_padding * 3 + tile_window_button_width * 2, 5), (tile_window_button_width, tile_window_button_height)),
+                        relative_rect=pygame.Rect((tile_window_button_padding * 3 + tile_window_button_width * 2, 5),
+                                                  (tile_window_button_width, tile_window_button_height)),
                         text="Maximize",
                         manager=manager,
                         container=tile_window_bottom_bar
                     )
                     set_bg_button = pygame_gui.elements.UIButton(
-                        relative_rect=pygame.Rect((tile_window_button_padding * 4 + tile_window_button_width * 3, 5), (tile_window_button_width, tile_window_button_height)),
+                        relative_rect=pygame.Rect((tile_window_button_padding * 4 + tile_window_button_width * 3, 5),
+                                                  (tile_window_button_width, tile_window_button_height)),
                         text="Set BG",
                         manager=manager,
                         container=tile_window_bottom_bar
@@ -832,112 +891,17 @@ while running:
                     get_back_button.kill()
                     get_back_button = None
             elif event.ui_element == home_button:
-                # Launch home_page.py and close main.py
                 subprocess.Popen(["python", "home_page.py"])
                 pygame.quit()
                 sys.exit()
         elif event.type == pygame_gui.UI_WINDOW_CLOSE:
-            if event.ui_element == tile_window:
+            if tile_window and event.ui_element == tile_window:
+                tile_window.kill()
                 tile_window = None
                 tile_window_visible = False
                 tile_window_maximized = False
 
         manager.process_events(event)
-
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if 'image_rect' in locals() and image_rect and image_rect.collidepoint(event.pos):
-                x, y = event.pos
-                rel_x = (x - image_rect.left) / image_rect.width
-                rel_y = (y - image_rect.top) / image_rect.height
-                found_area = None
-                if image_viewing_mode:
-                    image_path = image_viewing_images[image_viewing_index]
-                    link_areas = image_viewing_link_areas.get(image_path, [])
-                else:
-                    current_tile = tile_system.get_current_tile()
-                    if current_tile:
-                        image_index = tile_system.current_image_index
-                        link_areas = current_tile.link_areas.get(image_index, [])
-                    else:
-                        link_areas = []
-                for area in link_areas:
-                    rel_x0, rel_y0, rel_x1, rel_y1 = area['coords']
-                    if rel_x0 <= rel_x <= rel_x1 and rel_y0 <= rel_y <= rel_y1:
-                        found_area = area
-                        break
-                if found_area:
-                    if assign_link_folder_mode:
-                        directory = open_file_explorer()
-                        if directory:
-                            found_area['link'] = directory
-                            bring_window_to_front()
-                            if image_viewing_mode:
-                                save_image_viewing_link_areas()
-                            else:
-                                tile_system.save_game_state()
-                        assign_link_folder_mode = False
-                        assign_link_folder_button.set_text("Assign Link Folder: OFF")
-                        drawing_link_area = False
-                        link_area_start_pos = None
-                        link_area_rect = None
-                    elif assign_json_area_mode:
-                        json_file = filedialog.askopenfilename(
-                            title="Select a JSON file",
-                            initialdir=tile_system.save_directory,
-                            filetypes=[("JSON files", "*.json")]
-                        )
-                        if json_file:
-                            found_area['json'] = json_file
-                            bring_window_to_front()
-                            if image_viewing_mode:
-                                save_image_viewing_link_areas()
-                            else:
-                                tile_system.save_game_state()
-                        assign_json_area_mode = False
-                        assign_json_area_button.set_text("Assign JSON Area: OFF")
-                        drawing_link_area = False
-                        link_area_start_pos = None
-                        link_area_rect = None
-                    else:
-                        if event.button == 1:
-                            if 'json' in found_area and found_area['json']:
-                                json_file = found_area['json']
-                                tile_system.save_current_state_to_history()
-                                tile_system.load_game_state_from_file(json_file)
-                                bring_window_to_front()
-                                image_viewing_mode = False
-                                if get_back_button is not None:
-                                    get_back_button.kill()
-                                    get_back_button = None
-                            elif 'link' in found_area and found_area['link']:
-                                link = found_area['link']
-                                if link and os.path.isdir(link):
-                                    if image_viewing_mode:
-                                        save_image_viewing_link_areas()
-                                    image_viewing_mode = True
-                                    image_viewing_directory = link
-                                    image_viewing_images = [os.path.join(link, f) for f in os.listdir(link)
-                                                            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
-                                    image_viewing_images.sort()
-                                    image_viewing_index = 0
-                                    load_image_viewing_link_areas()
-                                    if get_back_button is None:
-                                        get_back_button = pygame_gui.elements.UIButton(
-                                            relative_rect=pygame.Rect((10, 70), (50, 50)),
-                                            text="Back",
-                                            manager=manager
-                                        )
-                                else:
-                                    messagebox.showwarning("Folder Link", "No valid folder link found for this area.")
-                                    bring_window_to_front()
-                            else:
-                                messagebox.showwarning("No Link Assigned", "No link or JSON assigned to this area.")
-                                bring_window_to_front()
-
-    if confirmation_button and pygame.time.get_ticks() > confirmation_end_time:
-        confirmation_button.set_text(original_button_texts[confirmation_button])
-        confirmation_button = None
-        print("Button confirmation hidden")
 
     manager.update(time_delta)
 
@@ -1012,21 +976,6 @@ while running:
             tile_col = int((local_mouse_pos[0] - offset_x) // scaled_square_size)
             tile_row = int((local_mouse_pos[1] - offset_y) // scaled_square_size)
             tile_system.draw_ghost_tile(tile_row, tile_col, offset_x, offset_y, tile_image.image, zoom_factor)
-        if tile_system.sub_grid_visible:
-            for vector in tile_system.vector_lines:
-                if vector.is_complete:
-                    start_x, start_y = vector.start_tile.get_subgrid_square_center(
-                        vector.start_subgrid_pos[0], vector.start_subgrid_pos[1], offset_x, offset_y, zoom_factor)
-                    end_x, end_y = vector.end_tile.get_subgrid_square_center(
-                        vector.end_subgrid_pos[0], vector.end_subgrid_pos[1], offset_x, offset_y, zoom_factor)
-                    pygame.draw.line(tile_image.image, (0, 255, 0), (start_x, start_y), (end_x, end_y), 2)
-
-            if vector_drawing and current_vector_line:
-                start_x, start_y = current_vector_line.start_tile.get_subgrid_square_center(
-                    current_vector_line.start_subgrid_pos[0], current_vector_line.start_subgrid_pos[1], offset_x, offset_y, zoom_factor)
-                end_x, end_y = local_mouse_pos
-                pygame.draw.line(tile_image.image, (0, 255, 0), (start_x, start_y), (end_x, end_y), 2)
-
         tile_image_surface.blit(tile_image.image, (0, 0))
 
     manager.draw_ui(screen)
