@@ -19,6 +19,13 @@ root = Tk()
 root.withdraw()
 
 ###############################################################################
+# CONSTANTS & GLOBALS
+###############################################################################
+EXTRA_TITLEBAR_HEIGHT = 30  # Extra height to account for the UIWindow title bar
+# For a more compact tile window bottom bar, we use a smaller height:
+tile_window_bottom_bar_height = 40
+
+###############################################################################
 # If a JSON map path is passed as an argument, store it
 ###############################################################################
 linked_json_to_load = None
@@ -141,8 +148,7 @@ load_game_button = pygame_gui.elements.UIButton(
 )
 
 ###############################################################################
-# We keep references to tile_window + the following buttons in top-level variables
-# so that we can reassign them after closing/reopening.
+# Global references for tile window and its buttons
 ###############################################################################
 tile_window = None
 tile_image = None
@@ -152,8 +158,11 @@ maximize_button = None
 
 tile_window_width = tile_system.SQUARE_SIZE * 9
 tile_window_height = tile_system.SQUARE_SIZE * 9
-tile_window_bottom_bar_height = 60
+# tile_window_bottom_bar_height is defined above (set to 40 for a more compact layout)
 
+###############################################################################
+# Create Map Window Function (Modified for Space Saving Buttons)
+###############################################################################
 def create_map_window():
     """
     Create the map tile window (and its bottom bar) at the initial position/size.
@@ -162,9 +171,10 @@ def create_map_window():
     global tile_window, tile_image
     global tile_window_bottom_bar, reset_view_button, maximize_button
 
+    # Increase height to account for the title bar.
     tile_window_rect = pygame.Rect(
         (screen_width - tile_window_width - 10, 10),
-        (tile_window_width, tile_window_height + tile_window_bottom_bar_height)
+        (tile_window_width, tile_window_height + tile_window_bottom_bar_height + EXTRA_TITLEBAR_HEIGHT)
     )
 
     tile_window = pygame_gui.elements.UIWindow(
@@ -174,36 +184,50 @@ def create_map_window():
         object_id="#tile_window"
     )
 
-    # Create tile image filling the entire window (no left panel)
-    tile_image_surf = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
+    # Use the window's content container for proper positioning.
+    window_container = tile_window.get_container()
+    container_size = window_container.get_size()
+
+    # The tile image fills the area above the bottom bar.
+    tile_image_height = container_size[1] - tile_window_bottom_bar_height
+    tile_image_surf = pygame.Surface((tile_window_width, tile_image_height), pygame.SRCALPHA)
     tile_image = pygame_gui.elements.UIImage(
-        relative_rect=pygame.Rect((0, 0), (tile_window_width, tile_window_height)),
+        relative_rect=pygame.Rect((0, 0), (tile_window_width, tile_image_height)),
         image_surface=tile_image_surf,
         manager=manager,
-        container=tile_window
+        container=window_container
     )
 
+    # The bottom bar panel is positioned at the bottom of the container.
     tile_window_bottom_bar = pygame_gui.elements.UIPanel(
-        relative_rect=pygame.Rect((0, tile_window_height), (tile_window_width, tile_window_bottom_bar_height)),
+        relative_rect=pygame.Rect((0, tile_image_height), (tile_window_width, tile_window_bottom_bar_height)),
         manager=manager,
-        container=tile_window,
+        container=window_container,
         object_id="#tile_window_bottom_bar"
     )
 
-    tile_window_button_width = (tile_window_width - 50) // 2
-    tile_window_button_height = tile_window_bottom_bar_height - 10
-    tile_window_button_padding = 10
+    # Use smaller padding for more compact buttons
+    tile_window_button_padding = 5
+    # Compute button width so that there are 3 gaps of padding (left, middle, right)
+    tile_window_button_width = (tile_window_width - (3 * tile_window_button_padding)) // 2
+    # Button height: subtract top and bottom padding from the bottom bar height
+    tile_window_button_height = tile_window_bottom_bar_height - (2 * tile_window_button_padding)
 
     reset_view_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((tile_window_button_padding, 5), (tile_window_button_width, tile_window_button_height)),
+        relative_rect=pygame.Rect(
+            (tile_window_button_padding, tile_window_button_padding),
+            (tile_window_button_width, tile_window_button_height)
+        ),
         text="Reset View",
         manager=manager,
         container=tile_window_bottom_bar
     )
 
     maximize_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((tile_window_button_padding * 2 + tile_window_button_width, 5),
-                                  (tile_window_button_width, tile_window_button_height)),
+        relative_rect=pygame.Rect(
+            (2 * tile_window_button_padding + tile_window_button_width, tile_window_button_padding),
+            (tile_window_button_width, tile_window_button_height)
+        ),
         text="Maximize",
         manager=manager,
         container=tile_window_bottom_bar
@@ -297,8 +321,10 @@ while running:
                 tile_window.set_relative_position((10, 10))
                 tile_window.set_dimensions((screen_width - 20, screen_height - bottom_bar_height - 20))
                 if tile_image is not None:
-                    new_w = tile_window.get_relative_rect().width
-                    new_h = tile_window.get_relative_rect().height - tile_window_bottom_bar_height
+                    container = tile_window.get_container()
+                    container_size = container.get_size()
+                    new_w = container_size[0]
+                    new_h = container_size[1] - tile_window_bottom_bar_height
                     tile_image.set_dimensions((new_w, new_h))
                     tile_image_surf = pygame.Surface((new_w, new_h), pygame.SRCALPHA)
                     tile_image.set_image(tile_image_surf)
@@ -420,29 +446,32 @@ while running:
 
             elif event.ui_element == maximize_button:
                 tile_window_maximized = not tile_window_maximized
-                if tile_window_maximized and tile_window is not None:
-                    maximize_button.set_text("Restore")
-                    tile_window.set_relative_position((10, 10))
-                    tile_window.set_dimensions((screen_width - 20, screen_height - bottom_bar_height - 20))
-                    if tile_image is not None:
-                        new_w = tile_window.get_relative_rect().width
-                        new_h = tile_window.get_relative_rect().height - tile_window_bottom_bar_height
+                if tile_window is not None:
+                    if tile_window_maximized:
+                        maximize_button.set_text("Restore")
+                        tile_window.set_relative_position((10, 10))
+                        tile_window.set_dimensions((screen_width - 20, screen_height - bottom_bar_height - 20))
+                        container = tile_window.get_container()
+                        container_size = container.get_size()
+                        new_w = container_size[0]
+                        new_h = container_size[1] - tile_window_bottom_bar_height
                         tile_image.set_dimensions((new_w, new_h))
                         tile_image_surf = pygame.Surface((new_w, new_h), pygame.SRCALPHA)
                         tile_image.set_image(tile_image_surf)
                         tile_window_bottom_bar.set_relative_position((0, new_h))
                         tile_window_bottom_bar.set_dimensions((new_w, tile_window_bottom_bar_height))
-                else:
-                    maximize_button.set_text("Maximize")
-                    if tile_window is not None:
+                    else:
+                        maximize_button.set_text("Maximize")
                         tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
-                        tile_window.set_dimensions((tile_window_width, tile_window_height + tile_window_bottom_bar_height))
-                        if tile_image is not None:
-                            tile_image.set_dimensions((tile_window_width, tile_window_height))
-                            tile_image_surf = pygame.Surface((tile_window_width, tile_window_height), pygame.SRCALPHA)
-                            tile_image.set_image(tile_image_surf)
-                            tile_window_bottom_bar.set_relative_position((0, tile_window_height))
-                            tile_window_bottom_bar.set_dimensions((tile_window_width, tile_window_bottom_bar_height))
+                        tile_window.set_dimensions((tile_window_width, tile_window_height + tile_window_bottom_bar_height + EXTRA_TITLEBAR_HEIGHT))
+                        container = tile_window.get_container()
+                        container_size = container.get_size()
+                        tile_image_height = container_size[1] - tile_window_bottom_bar_height
+                        tile_image.set_dimensions((tile_window_width, tile_image_height))
+                        tile_image_surf = pygame.Surface((tile_window_width, tile_image_height), pygame.SRCALPHA)
+                        tile_image.set_image(tile_image_surf)
+                        tile_window_bottom_bar.set_relative_position((0, tile_image_height))
+                        tile_window_bottom_bar.set_dimensions((tile_window_width, tile_window_bottom_bar_height))
 
             elif event.ui_element == restore_tile_window_button:
                 if tile_window is None:
