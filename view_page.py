@@ -15,31 +15,37 @@ import cairosvg
 import tile_system_view as tile_system
 
 pygame.init()
+pygame.mixer.init()  # Initialize the mixer for sound effects
+
+# Load sound effects
+sound_effects_enabled = True  # Default: Sound Effects ON
+pan_sound = pygame.mixer.Sound("pan.mp3")   # (Convert to a supported format if needed)
+step_sound = pygame.mixer.Sound("step.mp3")
+sound_effects_toggle = None  # Will be created in the settings popup
+
 root = Tk()
 root.withdraw()
 
 ###############################################################################
 # CONSTANTS & GLOBALS
 ###############################################################################
-EXTRA_TITLEBAR_HEIGHT = 30  # Extra height to account for the UIWindow title bar
+EXTRA_TITLEBAR_HEIGHT = 30
 tile_window_bottom_bar_height = 40
 
-# Global variable to control whether panning (the “Pan Effect”) is enabled.
-pan_effect_enabled = True
+# Settings defaults:
+pan_effect_enabled = False      # Pan Effect OFF by default
+belt_fade_enabled = True        # Belt Fade ON by default
 
-# New global: control whether belt fade is enabled.
-belt_fade_enabled = False
-
-# Global references for our Settings popup and its toggle buttons.
+# UI popup toggle references
 settings_popup = None
 pan_effect_toggle = None
 belt_fade_toggle = None
 
-# --- Transition effect globals ---
+# Transition effect globals
 transition_active = False
 transition_start_time = 0.0
 transition_duration = 0.25  # seconds
-transition_direction = 0   # 1 means new image comes from right; -1 means new image comes from left
+transition_direction = 0    # 1 for right; -1 for left
 transition_old_index = None
 transition_new_index = None
 transition_old_surface = None
@@ -48,16 +54,20 @@ transition_new_surface = None
 ###############################################################################
 # --- BELT MODE GLOBALS ---
 ###############################################################################
-belt_mode_active = False        # True when the main image area is in free (belt) mode.
-belt_dragging = False           # True while the mouse is held down.
-belt_drag_start_x = None        # The last mouse x-position (for computing delta x).
-belt_offset = None              # Horizontal offset into the belt (in pixels).
-belt_surfaces = []              # List of tuples: (pygame.Surface, width) for each preloaded image.
-belt_surfaces_faded = []        # Cache for faded surfaces when belt fade is enabled.
+belt_mode_active = False        # True when using belt mode
+belt_dragging = False           # True while dragging
+belt_drag_start_x = None        # Last mouse x for dragging
+belt_offset = None              # Horizontal offset into the belt (pixels)
+belt_surfaces = []              # List of tuples (surface, width) for each preloaded image
+belt_surfaces_faded = []        # Cache for faded surfaces (surface, width)
 OVERLAP_FRACTION = 0.10         # 10% overlap for fade blending
 
+# For preserving view between tiles:
+last_tile_coord = None
+belt_view_fraction = None  # (belt_offset + main_area.width/2) / total_width
+
 ###############################################################################
-# If a JSON map path is passed as an argument, store it
+# JSON map argument (if provided)
 ###############################################################################
 linked_json_to_load = None
 if len(sys.argv) > 1:
@@ -120,11 +130,10 @@ def cv2_to_pygame(img_cv2):
     return None
 
 def get_faded_surface(surf, overlap_fraction):
-    """Return a copy of surf with its left and right edges faded."""
+    """Return a copy of surf with its left/right edges faded."""
     faded = surf.copy().convert_alpha()
     w, h = faded.get_size()
     overlap = int(w * overlap_fraction)
-    # Fade left edge (alpha from 0 -> 255)
     for x in range(overlap):
         alpha_factor = x / overlap
         for y in range(h):
@@ -132,7 +141,6 @@ def get_faded_surface(surf, overlap_fraction):
             new_alpha = int(color.a * alpha_factor)
             color.a = new_alpha
             faded.set_at((x, y), color)
-    # Fade right edge (alpha from 255 -> 0)
     for x in range(w - overlap, w):
         alpha_factor = (w - x) / overlap
         for y in range(h):
@@ -199,12 +207,12 @@ settings_button = pygame_gui.elements.UIButton(
 )
 
 ###############################################################################
-# Function to create the Settings popup window (with two toggles)
+# Settings Popup Creation
 ###############################################################################
 def create_settings_popup():
-    global settings_popup, pan_effect_toggle, belt_fade_toggle, belt_fade_enabled, pan_effect_enabled
+    global settings_popup, pan_effect_toggle, belt_fade_toggle, sound_effects_toggle
     settings_popup = pygame_gui.elements.UIWindow(
-        rect=pygame.Rect((screen_width // 2 - 150, screen_height // 2 - 75), (300, 150)),
+        rect=pygame.Rect((screen_width // 2 - 150, screen_height // 2 - 90), (300, 180)),
         manager=manager,
         window_display_title="Settings",
         object_id="#settings_popup"
@@ -221,9 +229,15 @@ def create_settings_popup():
         manager=manager,
         container=settings_popup
     )
+    sound_effects_toggle = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((20, 120), (260, 30)),
+        text="Sound Effects: On" if sound_effects_enabled else "Sound Effects: Off",
+        manager=manager,
+        container=settings_popup
+    )
 
 ###############################################################################
-# Global references for tile window and its buttons
+# Map Window Creation
 ###############################################################################
 tile_window = None
 tile_image = None
@@ -233,9 +247,6 @@ maximize_button = None
 tile_window_width = tile_system.SQUARE_SIZE * 9
 tile_window_height = tile_system.SQUARE_SIZE * 9
 
-###############################################################################
-# Create Map Window Function (Modified for Space Saving Buttons)
-###############################################################################
 def create_map_window():
     global tile_window, tile_image, tile_window_bottom_bar, reset_view_button, maximize_button
     tile_window_rect = pygame.Rect(
@@ -287,7 +298,7 @@ tile_window_maximized = False
 tile_window_visible = True
 
 ###############################################################################
-# MAP VIEW / ZOOM / PANNING
+# MAP VIEW / ZOOM / PANNING FUNCTIONS
 ###############################################################################
 zoom_factor = 1.0
 MIN_ZOOM = 0.5
@@ -316,7 +327,7 @@ def adjust_zoom(old_zoom, new_zoom):
     tile_system.map_offset[1] = center_y - map_y_before * tile_system.SQUARE_SIZE * new_zoom
 
 ###############################################################################
-# Function to start the slide transition effect when changing images
+# Slide Transition Function
 ###############################################################################
 def start_image_transition(key):
     global transition_active, transition_start_time, transition_direction
@@ -420,6 +431,8 @@ while running:
                 belt_surfaces_faded = []
                 if pan_effect_enabled:
                     start_image_transition(event.key)
+                    if sound_effects_enabled:
+                        pan_sound.play()
                 else:
                     if event.key == pygame.K_LEFT:
                         tile_system.save_current_state_to_history()
@@ -427,70 +440,99 @@ while running:
                     elif event.key == pygame.K_RIGHT:
                         tile_system.save_current_state_to_history()
                         tile_system.rotate_player(pygame.K_RIGHT)
+                    if sound_effects_enabled:
+                        pan_sound.play()
             else:
                 if event.key == pygame.K_LEFT:
                     if pan_effect_enabled:
                         start_image_transition(event.key)
+                        if sound_effects_enabled:
+                            pan_sound.play()
                     else:
                         tile_system.save_current_state_to_history()
                         tile_system.rotate_player(pygame.K_LEFT)
+                        if sound_effects_enabled:
+                            pan_sound.play()
                 elif event.key == pygame.K_RIGHT:
                     if pan_effect_enabled:
                         start_image_transition(event.key)
+                        if sound_effects_enabled:
+                            pan_sound.play()
                     else:
                         tile_system.save_current_state_to_history()
                         tile_system.rotate_player(pygame.K_RIGHT)
+                        if sound_effects_enabled:
+                            pan_sound.play()
                 elif event.key == pygame.K_UP:
                     tile_system.save_current_state_to_history()
                     tile_system.move_player(forward=True)
                     if follow_player:
                         reset_map_view()
+                    if sound_effects_enabled:
+                        step_sound.play()
                 elif event.key == pygame.K_DOWN:
                     tile_system.save_current_state_to_history()
                     tile_system.move_player(forward=False)
                     if follow_player:
                         reset_map_view()
+                    if sound_effects_enabled:
+                        step_sound.play()
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 4:
-                old_z = zoom_factor
-                zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
-                adjust_zoom(old_z, zoom_factor)
-            elif event.button == 5:
-                old_z = zoom_factor
-                zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
-                adjust_zoom(old_z, zoom_factor)
-            elif event.button == 1:
-                main_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
-                if tile_window and tile_window.visible and tile_image is not None:
-                    tw_abs_rect = tile_window.get_abs_rect()
-                    if tw_abs_rect.collidepoint(event.pos):
-                        ti_rel_rect = tile_image.get_relative_rect()
-                        local_x = event.pos[0] - tw_abs_rect.left - ti_rel_rect.left
-                        local_y = event.pos[1] - tw_abs_rect.top - ti_rel_rect.top
-                        if 0 <= local_x < ti_rel_rect.width and 0 <= local_y < ti_rel_rect.height:
-                            current_time = pygame.time.get_ticks()
-                            if (last_click_pos and abs(event.pos[0] - last_click_pos[0]) < 10 and
-                                abs(event.pos[1] - last_click_pos[1]) < 10 and
-                                (current_time - last_click_time < DOUBLE_CLICK_TIME)):
-                                scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
-                                row = int((local_y - tile_system.map_offset[1]) // scaled_sq)
-                                col = int((local_x - tile_system.map_offset[0]) // scaled_sq)
-                                tile_system.save_current_state_to_history()
-                                tile_system.move_player_to_tile(row, col)
-                                last_click_time = 0
-                                last_click_pos = None
-                                if follow_player:
-                                    reset_map_view()
+            if event.button == 1 and settings_popup is not None and settings_popup.visible and settings_popup.get_abs_rect().collidepoint(event.pos):
+                pass
+            else:
+                if event.button == 4:
+                    old_z = zoom_factor
+                    zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
+                    adjust_zoom(old_z, zoom_factor)
+                elif event.button == 5:
+                    old_z = zoom_factor
+                    zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
+                    adjust_zoom(old_z, zoom_factor)
+                elif event.button == 1:
+                    main_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
+                    if tile_window and tile_window.visible and tile_image is not None:
+                        tw_abs_rect = tile_window.get_abs_rect()
+                        if tw_abs_rect.collidepoint(event.pos):
+                            ti_rel_rect = tile_image.get_relative_rect()
+                            local_x = event.pos[0] - tw_abs_rect.left - ti_rel_rect.left
+                            local_y = event.pos[1] - tw_abs_rect.top - ti_rel_rect.top
+                            if 0 <= local_x < ti_rel_rect.width and 0 <= local_y < ti_rel_rect.height:
+                                current_time = pygame.time.get_ticks()
+                                if (last_click_pos and abs(event.pos[0] - last_click_pos[0]) < 10 and
+                                    abs(event.pos[1] - last_click_pos[1]) < 10 and
+                                    (current_time - last_click_time < DOUBLE_CLICK_TIME)):
+                                    scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
+                                    row = int((local_y - tile_system.map_offset[1]) // scaled_sq)
+                                    col = int((local_x - tile_system.map_offset[0]) // scaled_sq)
+                                    tile_system.save_current_state_to_history()
+                                    tile_system.move_player_to_tile(row, col)
+                                    last_click_time = 0
+                                    last_click_pos = None
+                                    if follow_player:
+                                        reset_map_view()
+                                else:
+                                    scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
+                                    row = int((local_y - tile_system.map_offset[1]) // scaled_sq)
+                                    col = int((local_x - tile_system.map_offset[0]) // scaled_sq)
+                                    tile_system.select_tile(row, col)
+                                    last_click_time = pygame.time.get_ticks()
+                                    last_click_pos = event.pos
+                                    panning = True
+                                    pan_start_local = (local_x, local_y)
+                                    follow_player = False
                             else:
-                                scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
-                                row = int((local_y - tile_system.map_offset[1]) // scaled_sq)
-                                col = int((local_x - tile_system.map_offset[0]) // scaled_sq)
-                                tile_system.select_tile(row, col)
-                                last_click_time = pygame.time.get_ticks()
-                                last_click_pos = event.pos
-                                panning = True
-                                pan_start_local = (local_x, local_y)
-                                follow_player = False
+                                if main_area.collidepoint(event.pos):
+                                    if not belt_mode_active:
+                                        belt_mode_active = True
+                                        belt_dragging = True
+                                        belt_drag_start_x = event.pos[0]
+                                        belt_offset = None
+                                        belt_surfaces = []
+                                        belt_surfaces_faded = []
+                                    else:
+                                        belt_dragging = True
+                                        belt_drag_start_x = event.pos[0]
                         else:
                             if main_area.collidepoint(event.pos):
                                 if not belt_mode_active:
@@ -515,18 +557,6 @@ while running:
                             else:
                                 belt_dragging = True
                                 belt_drag_start_x = event.pos[0]
-                else:
-                    if main_area.collidepoint(event.pos):
-                        if not belt_mode_active:
-                            belt_mode_active = True
-                            belt_dragging = True
-                            belt_drag_start_x = event.pos[0]
-                            belt_offset = None
-                            belt_surfaces = []
-                            belt_surfaces_faded = []
-                        else:
-                            belt_dragging = True
-                            belt_drag_start_x = event.pos[0]
         elif event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
                 panning = False
@@ -559,6 +589,9 @@ while running:
                 belt_fade_enabled = not belt_fade_enabled
                 belt_fade_toggle.set_text("Belt Fade: On" if belt_fade_enabled else "Belt Fade: Off")
                 belt_surfaces_faded = []
+            elif event.ui_element == sound_effects_toggle:
+                sound_effects_enabled = not sound_effects_enabled
+                sound_effects_toggle.set_text("Sound Effects: On" if sound_effects_enabled else "Sound Effects: Off")
             elif event.ui_element == home_button:
                 subprocess.Popen(["python", "home_page.py"])
                 pygame.quit()
@@ -618,6 +651,7 @@ while running:
                 settings_popup = None
                 pan_effect_toggle = None
                 belt_fade_toggle = None
+                sound_effects_toggle = None
             elif tile_window and event.ui_element == tile_window:
                 tile_window.kill()
                 tile_window = None
@@ -629,16 +663,30 @@ while running:
     manager.update(time_delta)
     main_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
     pygame.draw.rect(screen, IMAGE_BG_COLOR, main_area)
+    
     if tile_window and tile_window.visible and tile_image is not None:
         tile_image.image.fill((0, 0, 0, 0))
         tile_system.draw_board((0, 0), tile_system.map_offset[0], tile_system.map_offset[1],
                                tile_image.image, tile_image.get_relative_rect(), zoom_factor)
         tile_system.draw_player(tile_system.map_offset[0], tile_system.map_offset[1],
                                 tile_image.image, zoom_factor)
-        tile_image_surface = tile_image.image
-        tile_image_surface.blit(tile_image.image, (0, 0))
+        tile_image.image.blit(tile_image.image, (0, 0))
+    
     current_tile = tile_system.get_current_tile()
     if current_tile and current_tile.image_filenames:
+        # Preserve view fraction when switching tiles.
+        current_tile_coord = (current_tile.row, current_tile.col)
+        if last_tile_coord != current_tile_coord:
+            if belt_surfaces:
+                old_total_width = sum(w for (_, w) in belt_surfaces)
+                belt_view_fraction = (belt_offset + main_area.width/2) / old_total_width if old_total_width > 0 else None
+            else:
+                belt_view_fraction = None
+            belt_surfaces = []
+            belt_surfaces_faded = []
+            belt_offset = None
+            last_tile_coord = current_tile_coord
+
         if belt_mode_active:
             if not belt_surfaces:
                 belt_surfaces = []
@@ -652,72 +700,122 @@ while running:
                         scaled_cv2 = cv2.resize(cv2_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
                         surf = cv2_to_pygame(scaled_cv2)
                         belt_surfaces.append((surf, new_w))
-            total_width = sum(w for (surf, w) in belt_surfaces)
+
+            total_width = sum(w for (_, w) in belt_surfaces)
             if belt_offset is None:
-                current_idx = tile_system.current_image_index % len(belt_surfaces)
-                cum_width = sum(belt_surfaces[i][1] for i in range(current_idx))
-                belt_offset = cum_width + belt_surfaces[current_idx][1] / 2 - main_area.width / 2
-            # Draw belt with fade if enabled.
+                if belt_view_fraction is not None:
+                    belt_offset = belt_view_fraction * total_width - main_area.width / 2
+                else:
+                    current_idx = tile_system.current_image_index % len(belt_surfaces)
+                    cum_width = sum(belt_surfaces[i][1] for i in range(current_idx))
+                    belt_offset = cum_width + belt_surfaces[current_idx][1] / 2 - main_area.width / 2
+
+            # Normalize belt_offset for looping
+            normalized_offset = belt_offset % total_width
+            if normalized_offset < 0:
+                normalized_offset += total_width
+
+            # Calculate visibility based on fade or no-fade mode
             if belt_fade_enabled:
                 if not belt_surfaces_faded:
                     belt_surfaces_faded = []
-                    effective_widths = []
                     for (surf, w) in belt_surfaces:
                         faded = get_faded_surface(surf, OVERLAP_FRACTION)
                         belt_surfaces_faded.append((faded, w))
-                        effective_widths.append(w - int(w * OVERLAP_FRACTION))
-                    total_eff = sum(effective_widths)
-                else:
-                    effective_widths = [w - int(w * OVERLAP_FRACTION) for (surf, w) in belt_surfaces]
-                    total_eff = sum(effective_widths)
-                x = - (belt_offset % total_eff)
-                if x > 0:
-                    x -= total_eff
+                
+                # Calculate total width with overlap
+                overlap = int(belt_surfaces[0][1] * OVERLAP_FRACTION)  # Assume uniform overlap
+                effective_step = [w - overlap for (_, w) in belt_surfaces]
+                total_effective_width = sum(effective_step)
+
+                # Normalize offset for faded belt
+                normalized_fade_offset = belt_offset % total_effective_width
+                if normalized_fade_offset < 0:
+                    normalized_fade_offset += total_effective_width
+
+                # Calculate visibility for faded belt
+                viewport_left = normalized_fade_offset
+                viewport_right = normalized_fade_offset + main_area.width
+                image_positions = []  # (index, left_x, right_x)
+                x = 0
+                for i, step in enumerate(effective_step):
+                    image_left = x
+                    image_right = x + step + overlap  # Full width for visibility
+                    image_positions.append((i, image_left, image_right))
+                    x += step
+
+                # Find the most visible image
+                max_visible_area = 0
+                best_index = 0
+                for i, left_x, right_x in image_positions:
+                    for offset in [0, total_effective_width]:
+                        adj_left = left_x + offset
+                        adj_right = right_x + offset
+                        visible_left = max(adj_left, viewport_left)
+                        visible_right = min(adj_right, viewport_right)
+                        visible_width = max(0, visible_right - visible_left)
+                        if visible_width > max_visible_area:
+                            max_visible_area = visible_width
+                            best_index = i
+
+                # Set player direction
+                tile_system.player_direction = best_index % 8
+                tile_system.current_image_index = best_index % len(belt_surfaces)
+
+                # Render the faded belt
+                x = -normalized_fade_offset
+                start_x = x
                 while x < main_area.width:
-                    for i, (faded_surf, w) in enumerate(belt_surfaces_faded):
-                        e_width = w - int(w * OVERLAP_FRACTION)
+                    for i, ((_, w), (faded_surf, _)) in enumerate(zip(belt_surfaces, belt_surfaces_faded)):
                         pos_x = main_area.left + x
                         screen.blit(faded_surf, (pos_x, main_area.top))
-                        x += e_width
-                        if x >= main_area.width:
-                            break
+                        x += effective_step[i]
+                    if x < start_x + total_effective_width and total_effective_width > main_area.width:
+                        x = start_x + total_effective_width
+
             else:
-                x = - (belt_offset % total_width)
-                if x > 0:
-                    x -= total_width
+                # Non-faded mode (works perfectly)
+                viewport_left = normalized_offset
+                viewport_right = normalized_offset + main_area.width
+                image_positions = []  # (index, left_x, right_x)
+                x = 0
+                for i, (_, w) in enumerate(belt_surfaces):
+                    image_left = x
+                    image_right = x + w
+                    image_positions.append((i, image_left, image_right))
+                    x += w
+
+                # Find the most visible image
+                max_visible_area = 0
+                best_index = 0
+                for i, left_x, right_x in image_positions:
+                    for offset in [0, total_width]:
+                        adj_left = left_x + offset
+                        adj_right = right_x + offset
+                        visible_left = max(adj_left, viewport_left)
+                        visible_right = min(adj_right, viewport_right)
+                        visible_width = max(0, visible_right - visible_left)
+                        if visible_width > max_visible_area:
+                            max_visible_area = visible_width
+                            best_index = i
+
+                # Set player direction
+                tile_system.player_direction = best_index % 8
+                tile_system.current_image_index = best_index % len(belt_surfaces)
+
+                # Render the non-faded belt
+                x = -normalized_offset
+                start_x = x
                 while x < main_area.width:
-                    for (surf, w) in belt_surfaces:
+                    for i, (surf, w) in enumerate(belt_surfaces):
                         pos_x = main_area.left + x
                         screen.blit(surf, (pos_x, main_area.top))
                         x += w
-                        if x >= main_area.width:
-                            break
-            # UPDATE PLAYER ORIENTATION BASED ON THE IMAGE CENTER CLOSEST TO MAIN AREA CENTER
-            if total_width > 0 and belt_surfaces:
-                normalized_offset = belt_offset % total_width
-                cumulative = []
-                pos = 0
-                for (surf, w) in belt_surfaces:
-                    cumulative.append(pos)
-                    pos += w
-                target = main_area.width / 2
-                best_index = 0
-                best_diff = float('inf')
-                for i, (surf, w) in enumerate(belt_surfaces):
-                    # Compute the image center relative to main_area:
-                    center_i = cumulative[i] + w/2 - normalized_offset
-                    # Consider wrapping: if the center is off the left edge, add total_width; if off right, subtract total_width.
-                    candidates = [center_i]
-                    if center_i < 0:
-                        candidates.append(center_i + total_width)
-                    if center_i > main_area.width:
-                        candidates.append(center_i - total_width)
-                    diff = min(abs(cand - target) for cand in candidates)
-                    if diff < best_diff:
-                        best_diff = diff
-                        best_index = i
-                tile_system.player_direction = best_index
-                tile_system.current_image_index = best_index
+                    if x < start_x + total_width and total_width > main_area.width:
+                        x = start_x + total_width
+
+            belt_view_fraction = (belt_offset + main_area.width / 2) / total_width if total_width > 0 else None
+
         else:
             if transition_active:
                 current_time = pygame.time.get_ticks() / 1000.0
