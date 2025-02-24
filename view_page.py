@@ -16,6 +16,9 @@ import tile_system_view as tile_system
 pygame.init()
 pygame.mixer.init()
 
+# Initialize joystick module
+pygame.joystick.init()
+
 sound_effects_enabled = True
 pan_sound = pygame.mixer.Sound("pan.mp3")
 step_sound = pygame.mixer.Sound("step.mp3")
@@ -32,10 +35,12 @@ tile_window_bottom_bar_height = 40
 
 pan_effect_enabled = False
 belt_fade_enabled = True
+gamepad_enabled = True  # Default to On
 
 settings_popup = None
 pan_effect_toggle = None
 belt_fade_toggle = None
+gamepad_toggle = None
 
 transition_active = False
 transition_start_time = 0.0
@@ -63,6 +68,15 @@ if len(sys.argv) > 1:
     print(f"[view_page] Received argument => {linked_json_to_load}")
 else:
     print("[view_page] No argument passed => no immediate load")
+
+# Gamepad setup
+joystick = None
+if pygame.joystick.get_count() > 0:
+    joystick = pygame.joystick.Joystick(0)
+    joystick.init()
+    print(f"[view_page] Gamepad detected: {joystick.get_name()}")
+else:
+    print("[view_page] No gamepad detected")
 
 ###############################################################################
 # HELPER FUNCTIONS
@@ -188,9 +202,9 @@ settings_button = pygame_gui.elements.UIButton(
 )
 
 def create_settings_popup():
-    global settings_popup, pan_effect_toggle, belt_fade_toggle, sound_effects_toggle
+    global settings_popup, pan_effect_toggle, belt_fade_toggle, sound_effects_toggle, gamepad_toggle
     settings_popup = pygame_gui.elements.UIWindow(
-        rect=pygame.Rect((screen_width // 2 - 150, screen_height // 2 - 90), (300, 180)),
+        rect=pygame.Rect((screen_width // 2 - 150, screen_height // 2 - 115), (300, 230)),
         manager=manager,
         window_display_title="Settings",
         object_id="#settings_popup"
@@ -210,6 +224,12 @@ def create_settings_popup():
     sound_effects_toggle = pygame_gui.elements.UIButton(
         relative_rect=pygame.Rect((20, 120), (260, 30)),
         text="Sound Effects: On" if sound_effects_enabled else "Sound Effects: Off",
+        manager=manager,
+        container=settings_popup
+    )
+    gamepad_toggle = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((20, 170), (260, 30)),
+        text="Gamepad: On" if gamepad_enabled else "Gamepad: Off",
         manager=manager,
         container=settings_popup
     )
@@ -360,10 +380,88 @@ panning = False
 pan_start_pos = None
 click_count = 0
 
+# Track gamepad states
+dpad_states = {pygame.K_UP: False, pygame.K_DOWN: False}
+stick_states = {pygame.K_LEFT: False, pygame.K_RIGHT: False}
+left_stick_states = {"up": False, "down": False, "left": False, "right": False}
+STICK_THRESHOLD = 0.5
+
 while running:
     time_delta = clock.tick(60) / 1000.0
     screen.fill(MAIN_BG_COLOR)
     mouse_pos = pygame.mouse.get_pos()
+
+    # Handle gamepad input if enabled
+    if gamepad_enabled and joystick:
+        for event in pygame.event.get():
+            if event.type == pygame.JOYHATMOTION:
+                hat_x, hat_y = joystick.get_hat(0)
+                new_dpad_states = {
+                    pygame.K_UP: hat_y == 1,
+                    pygame.K_DOWN: hat_y == -1
+                }
+                for key, new_state in new_dpad_states.items():
+                    if new_state and not dpad_states[key]:
+                        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
+                    dpad_states[key] = new_state
+            elif event.type == pygame.JOYAXISMOTION:
+                # Right stick (panning)
+                if event.axis == 2:  # Right stick X-axis
+                    axis_value = event.value
+                    new_stick_states = {
+                        pygame.K_LEFT: axis_value < -STICK_THRESHOLD,
+                        pygame.K_RIGHT: axis_value > STICK_THRESHOLD
+                    }
+                    for key, new_state in new_stick_states.items():
+                        if new_state and not stick_states[key]:
+                            pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
+                        stick_states[key] = new_state
+                # Left stick (movement)
+                elif event.axis in (0, 1):  # Left stick X (0) and Y (1)
+                    stick_x = joystick.get_axis(0)
+                    stick_y = joystick.get_axis(1)
+                    # Define movement directions relative to player_direction
+                    direction = tile_system.player_direction % 8
+                    moves = {
+                        0: {"up": (-1, 0), "down": (1, 0), "left": (0, -1), "right": (0, 1)},  # Up
+                        1: {"up": (-1, 1), "down": (1, -1), "left": (-1, -1), "right": (1, 1)},  # Up-Right
+                        2: {"up": (0, 1), "down": (0, -1), "left": (-1, 0), "right": (1, 0)},  # Right
+                        3: {"up": (1, 1), "down": (-1, -1), "left": (-1, 1), "right": (1, -1)},  # Down-Right
+                        4: {"up": (1, 0), "down": (-1, 0), "left": (0, 1), "right": (0, -1)},  # Down
+                        5: {"up": (1, -1), "down": (-1, 1), "left": (1, 1), "right": (-1, -1)},  # Down-Left
+                        6: {"up": (0, -1), "down": (0, 1), "left": (1, 0), "right": (-1, 0)},  # Left
+                        7: {"up": (-1, -1), "down": (1, 1), "left": (1, -1), "right": (-1, 1)}  # Up-Left
+                    }
+                    new_left_stick = {
+                        "up": stick_y < -STICK_THRESHOLD,
+                        "down": stick_y > STICK_THRESHOLD,
+                        "left": stick_x < -STICK_THRESHOLD,
+                        "right": stick_x > STICK_THRESHOLD
+                    }
+                    for dir_key, new_state in new_left_stick.items():
+                        if new_state and not left_stick_states[dir_key]:
+                            d_row, d_col = moves[direction][dir_key]
+                            new_pos = [tile_system.player_pos[0] + d_row, tile_system.player_pos[1] + d_col]
+                            tile = tile_system.get_tile(new_pos[0], new_pos[1])
+                            if tile and tile.active:
+                                tile_system.save_current_state_to_history()
+                                tile_system.player_pos = new_pos
+                                if tile.image_filenames:
+                                    tile_system.current_image_index = tile_system.player_direction % len(tile.image_filenames)
+                                else:
+                                    tile_system.current_image_index = 0
+                                if follow_player:
+                                    reset_map_view()
+                                if sound_effects_enabled:
+                                    step_sound.play()
+                                print(f"[view_page] Moved to tile {new_pos} via Left Stick {dir_key}")
+                        left_stick_states[dir_key] = new_state
+            else:
+                pygame.event.post(event)
+    else:
+        events = pygame.event.get()
+        for event in events:
+            pygame.event.post(event)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -450,11 +548,11 @@ while running:
                 tile_window_active = tile_window and tile_window.visible and tile_image is not None
                 tw_abs_rect = tile_window.get_abs_rect() if tile_window_active else None
                 
-                if event.button == 4:  # Scroll up to zoom in
+                if event.button == 4:
                     old_z = zoom_factor
                     zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
                     adjust_zoom(old_z, zoom_factor)
-                elif event.button == 5:  # Scroll down to zoom out
+                elif event.button == 5:
                     old_z = zoom_factor
                     zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
                     adjust_zoom(old_z, zoom_factor)
@@ -462,7 +560,6 @@ while running:
                     main_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
                     
                     if tile_window_active and tw_abs_rect.collidepoint(event.pos):
-                        # Adjust local_y to account for title bar
                         ti_rel_rect = tile_image.get_relative_rect()
                         local_x = event.pos[0] - tw_abs_rect.left - ti_rel_rect.left
                         local_y = event.pos[1] - tw_abs_rect.top - ti_rel_rect.top - EXTRA_TITLEBAR_HEIGHT
@@ -476,7 +573,6 @@ while running:
                             click_count += 1
                             
                             if click_count == 1:
-                                # Single-click jump
                                 if tile and tile.active:
                                     current_direction = tile_system.player_direction
                                     tile_system.save_current_state_to_history()
@@ -561,6 +657,10 @@ while running:
             elif event.ui_element == sound_effects_toggle:
                 sound_effects_enabled = not sound_effects_enabled
                 sound_effects_toggle.set_text("Sound Effects: On" if sound_effects_enabled else "Sound Effects: Off")
+            elif event.ui_element == gamepad_toggle:
+                gamepad_enabled = not gamepad_enabled
+                gamepad_toggle.set_text("Gamepad: On" if gamepad_enabled else "Gamepad: Off")
+                print(f"[view_page] Gamepad controls {'enabled' if gamepad_enabled else 'disabled'}")
             elif event.ui_element == home_button:
                 subprocess.Popen(["python", "home_page.py"])
                 pygame.quit()
@@ -621,6 +721,7 @@ while running:
                 pan_effect_toggle = None
                 belt_fade_toggle = None
                 sound_effects_toggle = None
+                gamepad_toggle = None
             elif tile_window and event.ui_element == tile_window:
                 tile_window.kill()
                 tile_window = None
