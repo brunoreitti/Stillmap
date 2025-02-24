@@ -136,8 +136,18 @@ class Tile:
         tile_y = self.row * scaled_size + offset_y
         rect = pygame.Rect(tile_x, tile_y, scaled_size, scaled_size)
 
+        # Default color
         color = (128, 128, 128) if not self.active else BLACK
-        pygame.draw.rect(surface, color, rect, 1)
+        
+        # Check if mouse is over this tile and it's active
+        highlight = False
+        if mouse_pos is not None and self.active:
+            mx, my = mouse_pos
+            if (tile_x <= mx < tile_x + scaled_size) and (tile_y <= my < tile_y + scaled_size):
+                color = (0, 255, 0)  # Green for clickable tiles
+                highlight = True
+
+        pygame.draw.rect(surface, color, rect, 3 if highlight else 1)
 
         if sub_grid_visible:
             sub_s = scaled_size / 3
