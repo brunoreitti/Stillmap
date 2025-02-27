@@ -1,3 +1,4 @@
+# view_page.py
 import pygame
 import pygame_gui
 import ctypes
@@ -33,12 +34,13 @@ EXTRA_TITLEBAR_HEIGHT = 30
 tile_window_bottom_bar_height = 40
 
 pan_effect_enabled = False
-belt_fade_enabled = True
+belt_mode = "none"  # "none", "normal", or "faded"
 gamepad_enabled = True
 
 settings_popup = None
 pan_effect_toggle = None
-belt_fade_toggle = None
+belt_normal_toggle = None
+belt_faded_toggle = None
 gamepad_toggle = None
 
 transition_active = False
@@ -55,7 +57,6 @@ belt_dragging = False
 belt_drag_start_x = None
 belt_offset = None
 belt_surfaces = []
-belt_surfaces_faded = []
 OVERLAP_FRACTION = 0.10
 
 last_tile_coord = None
@@ -179,32 +180,31 @@ def preload_tile_images(max_memory_mb):
             continue
         for idx, filename in enumerate(tile.image_filenames):
             filepath = os.path.join(tile.directory, filename)
-            if (row, col, idx) in tile_image_cache:
-                loaded_images += 1
-                continue
+            key = (row, col, idx)
 
-            cv2_img = load_image(filepath)
-            if cv2_img is not None:
-                ih, iw = cv2_img.shape[:2]
-                scale_factor = 1000 / ih
-                new_w = int(iw * scale_factor)
-                new_h = 1000
-                scaled_cv2 = cv2.resize(cv2_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                surf = cv2_to_pygame(scaled_cv2)
-                if surf:
-                    size_mb = (new_w * new_h * 4) / (1024 * 1024)
-                    if total_size_mb + size_mb <= memory_limit:
-                        tile_image_cache[(row, col, idx)] = surf
-                        total_size_mb += size_mb
-                        loaded_images += 1
-                        print(f"[preload_tile_images] Loaded {filepath} ({size_mb:.2f} MB), Total: {total_size_mb:.2f} MB")
+            if key not in tile_image_cache:
+                cv2_img = load_image(filepath)
+                if cv2_img is not None:
+                    ih, iw = cv2_img.shape[:2]
+                    scale_factor = 1000 / ih
+                    new_w = int(iw * scale_factor)
+                    new_h = 1000
+                    scaled_cv2 = cv2.resize(cv2_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                    surf = cv2_to_pygame(scaled_cv2)
+                    if surf:
+                        size_mb = (new_w * new_h * 4) / (1024 * 1024)
+                        if total_size_mb + size_mb <= memory_limit:
+                            tile_image_cache[key] = surf
+                            total_size_mb += size_mb
+                            loaded_images += 1
+                            print(f"[preload_tile_images] Loaded {filepath} ({size_mb:.2f} MB), Total: {total_size_mb:.2f} MB")
+                        else:
+                            print(f"[preload_tile_images] Stopped at {total_size_mb:.2f} MB, RAM limit reached")
+                            break
                     else:
-                        print(f"[preload_tile_images] Stopped at {total_size_mb:.2f} MB, RAM limit reached")
-                        break
+                        print(f"[preload_tile_images] Failed to convert {filepath} to surface")
                 else:
-                    print(f"[preload_tile_images] Failed to convert {filepath} to surface")
-            else:
-                print(f"[preload_tile_images] Failed to load {filepath}")
+                    print(f"[preload_tile_images] Failed to load {filepath}")
 
             progress = loaded_images / total_images
             progress_width = int(bar_width * progress)
@@ -212,7 +212,155 @@ def preload_tile_images(max_memory_mb):
             pygame.draw.rect(progress_surface, (100, 100, 100), (bar_x, bar_y, bar_width, bar_height))
             pygame.draw.rect(progress_surface, (0, 255, 0), (bar_x, bar_y, progress_width, bar_height))
             pygame.draw.rect(progress_surface, MAIN_BG_COLOR, text_bg_rect)
-            text = font.render(f"Loading: {int(progress * 100)}%", True, (255, 255, 255))
+            text = font.render(f"Loading Single Images: {int(progress * 100)}%", True, (255, 255, 255))
+            text_rect = text.get_rect(center=(screen_width // 2, bar_y - 20))
+            progress_surface.blit(text, text_rect)
+            screen.blit(progress_surface, (0, 0))
+            pygame.display.flip()
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+
+def preload_belt_normal_images(max_memory_mb, belt_height):
+    available_memory = psutil.virtual_memory().available / (1024 * 1024)
+    memory_limit = min(available_memory - 2000, max_memory_mb)
+    print(f"[preload_belt_normal_images] Available memory: {available_memory:.2f} MB, Limit: {memory_limit:.2f} MB")
+
+    total_images = sum(len(tile.image_filenames) for tile in tile_system.tiles.values() if tile.image_filenames)
+    if total_images == 0:
+        print("[preload_belt_normal_images] No images to load")
+        return
+    loaded_images = 0
+    total_size_mb = 0
+
+    bar_width = 400
+    bar_height = 20
+    bar_x = (screen_width - bar_width) // 2
+    bar_y = (screen_height - bar_height) // 2
+    progress_surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+    font = pygame.font.Font(None, 36)
+    text_bg_rect = pygame.Rect(bar_x - 50, bar_y - 40, bar_width + 100, 40)
+
+    screen.fill(MAIN_BG_COLOR)
+    pygame.display.flip()
+
+    for (row, col), tile in tile_system.tiles.items():
+        if not tile.image_filenames or not tile.directory:
+            continue
+        for idx in range(len(tile.image_filenames)):
+            filepath = os.path.join(tile.directory, tile.image_filenames[idx])
+            belt_key = (row, col, idx, "belt_normal")
+
+            if belt_key not in tile_image_cache:
+                cv2_img = load_image(filepath)
+                if cv2_img is not None:
+                    ih, iw = cv2_img.shape[:2]
+                    scale_factor = belt_height / ih
+                    new_w = int(iw * scale_factor)
+                    new_h = belt_height
+                    scaled_cv2 = cv2.resize(cv2_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                    surf = cv2_to_pygame(scaled_cv2)
+                    if surf:
+                        size_mb = (new_w * new_h * 4) / (1024 * 1024)
+                        if total_size_mb + size_mb <= memory_limit:
+                            tile_image_cache[belt_key] = surf
+                            total_size_mb += size_mb
+                            loaded_images += 1
+                            print(f"[preload_belt_normal_images] Loaded {filepath} ({size_mb:.2f} MB), Total: {total_size_mb:.2f} MB")
+                        else:
+                            print(f"[preload_belt_normal_images] Stopped at {total_size_mb:.2f} MB, RAM limit reached")
+                            break
+                    else:
+                        print(f"[preload_belt_normal_images] Failed to convert {filepath} to surface")
+                else:
+                    print(f"[preload_belt_normal_images] Failed to load {filepath}")
+
+            progress = loaded_images / total_images
+            progress_width = int(bar_width * progress)
+            progress_surface.fill((0, 0, 0, 0))
+            pygame.draw.rect(progress_surface, (100, 100, 100), (bar_x, bar_y, bar_width, bar_height))
+            pygame.draw.rect(progress_surface, (0, 255, 0), (bar_x, bar_y, progress_width, bar_height))
+            pygame.draw.rect(progress_surface, MAIN_BG_COLOR, text_bg_rect)
+            text = font.render(f"Loading Belt Normal Images: {int(progress * 100)}%", True, (255, 255, 255))
+            text_rect = text.get_rect(center=(screen_width // 2, bar_y - 20))
+            progress_surface.blit(text, text_rect)
+            screen.blit(progress_surface, (0, 0))
+            pygame.display.flip()
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+
+def preload_belt_faded_images(max_memory_mb, belt_height):
+    available_memory = psutil.virtual_memory().available / (1024 * 1024)
+    memory_limit = min(available_memory - 2000, max_memory_mb)
+    print(f"[preload_belt_faded_images] Available memory: {available_memory:.2f} MB, Limit: {memory_limit:.2f} MB")
+
+    total_images = sum(len(tile.image_filenames) for tile in tile_system.tiles.values() if tile.image_filenames)
+    if total_images == 0:
+        print("[preload_belt_faded_images] No images to load")
+        return
+    loaded_images = 0
+    total_size_mb = 0
+
+    bar_width = 400
+    bar_height = 20
+    bar_x = (screen_width - bar_width) // 2
+    bar_y = (screen_height - bar_height) // 2
+    progress_surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+    font = pygame.font.Font(None, 36)
+    text_bg_rect = pygame.Rect(bar_x - 50, bar_y - 40, bar_width + 100, 40)
+
+    screen.fill(MAIN_BG_COLOR)
+    pygame.display.flip()
+
+    for (row, col), tile in tile_system.tiles.items():
+        if not tile.image_filenames or not tile.directory:
+            continue
+        for idx in range(len(tile.image_filenames)):
+            filepath = os.path.join(tile.directory, tile.image_filenames[idx])
+            belt_key = (row, col, idx, "belt_normal")
+            faded_key = (row, col, idx, "belt_faded")
+
+            if faded_key not in tile_image_cache:
+                if belt_key not in tile_image_cache:
+                    cv2_img = load_image(filepath)
+                    if cv2_img is not None:
+                        ih, iw = cv2_img.shape[:2]
+                        scale_factor = belt_height / ih
+                        new_w = int(iw * scale_factor)
+                        new_h = belt_height
+                        scaled_cv2 = cv2.resize(cv2_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                        surf = cv2_to_pygame(scaled_cv2)
+                        tile_image_cache[belt_key] = surf
+                    else:
+                        print(f"[preload_belt_faded_images] Failed to load {filepath}")
+                        continue
+                else:
+                    surf = tile_image_cache[belt_key]
+                
+                faded_surf = get_faded_surface(surf, OVERLAP_FRACTION)
+                if faded_surf:
+                    size_mb = (faded_surf.get_width() * faded_surf.get_height() * 4) / (1024 * 1024)
+                    if total_size_mb + size_mb <= memory_limit:
+                        tile_image_cache[faded_key] = faded_surf
+                        total_size_mb += size_mb
+                        loaded_images += 1
+                        print(f"[preload_belt_faded_images] Loaded faded {filepath} ({size_mb:.2f} MB), Total: {total_size_mb:.2f} MB")
+                    else:
+                        print(f"[preload_belt_faded_images] Stopped at {total_size_mb:.2f} MB, RAM limit reached")
+                        break
+
+            progress = loaded_images / total_images
+            progress_width = int(bar_width * progress)
+            progress_surface.fill((0, 0, 0, 0))
+            pygame.draw.rect(progress_surface, (100, 100, 100), (bar_x, bar_y, bar_width, bar_height))
+            pygame.draw.rect(progress_surface, (0, 255, 0), (bar_x, bar_y, progress_width, bar_height))
+            pygame.draw.rect(progress_surface, MAIN_BG_COLOR, text_bg_rect)
+            text = font.render(f"Loading Belt Faded Images: {int(progress * 100)}%", True, (255, 255, 255))
             text_rect = text.get_rect(center=(screen_width // 2, bar_y - 20))
             progress_surface.blit(text, text_rect)
             screen.blit(progress_surface, (0, 0))
@@ -274,7 +422,7 @@ settings_button = pygame_gui.elements.UIButton(
 )
 
 def create_settings_popup():
-    global settings_popup, pan_effect_toggle, belt_fade_toggle, sound_effects_toggle, gamepad_toggle
+    global settings_popup, pan_effect_toggle, belt_normal_toggle, belt_faded_toggle, sound_effects_toggle, gamepad_toggle
     settings_popup = pygame_gui.elements.UIWindow(
         rect=pygame.Rect((screen_width // 2 - 150, screen_height // 2 - 115), (300, 230)),
         manager=manager,
@@ -287,9 +435,15 @@ def create_settings_popup():
         manager=manager,
         container=settings_popup
     )
-    belt_fade_toggle = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((20, 70), (260, 30)),
-        text="Belt Fade: On" if belt_fade_enabled else "Belt Fade: Off",
+    belt_normal_toggle = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((20, 70), (130, 30)),
+        text="Belt Normal: On" if belt_mode == "normal" else "Belt Normal: Off",
+        manager=manager,
+        container=settings_popup
+    )
+    belt_faded_toggle = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((150, 70), (130, 30)),
+        text="Belt Faded: On" if belt_mode == "faded" else "Belt Faded: Off",
         manager=manager,
         container=settings_popup
     )
@@ -384,11 +538,9 @@ def adjust_zoom(old_zoom, new_zoom, pivot_x, pivot_y):
         return
     tile_image_rect = tile_image.get_relative_rect()
     
-    # Calculate pivot position in map coordinates before zoom
     map_x_before = (pivot_x - tile_system.map_offset[0]) / (tile_system.SQUARE_SIZE * old_zoom)
     map_y_before = (pivot_y - tile_system.map_offset[1]) / (tile_system.SQUARE_SIZE * old_zoom)
     
-    # Update offset so the pivot position remains the same after zoom
     tile_system.map_offset[0] = pivot_x - map_x_before * tile_system.SQUARE_SIZE * new_zoom
     tile_system.map_offset[1] = pivot_y - map_y_before * tile_system.SQUARE_SIZE * new_zoom
 
@@ -562,7 +714,6 @@ while running:
                 belt_dragging = False
                 belt_offset = None
                 belt_surfaces = []
-                belt_surfaces_faded = []
                 if pan_effect_enabled:
                     start_image_transition(event.key)
                     if sound_effects_enabled:
@@ -629,12 +780,10 @@ while running:
                     zoom_factor = min(zoom_factor + 0.1, MAX_ZOOM)
                     if tile_window_active:
                         if follow_player:
-                            # Pivot on player position (center of the map in follow mode)
                             player_x = ti_rel_rect.width // 2
                             player_y = ti_rel_rect.height // 2
                             adjust_zoom(old_z, zoom_factor, player_x, player_y)
                         else:
-                            # Pivot on mouse position
                             local_x = event.pos[0] - tw_abs_rect.left - ti_rel_rect.left
                             local_y = event.pos[1] - tw_abs_rect.top - ti_rel_rect.top - EXTRA_TITLEBAR_HEIGHT
                             adjust_zoom(old_z, zoom_factor, local_x, local_y)
@@ -643,12 +792,10 @@ while running:
                     zoom_factor = max(zoom_factor - 0.1, MIN_ZOOM)
                     if tile_window_active:
                         if follow_player:
-                            # Pivot on player position (center of the map in follow mode)
                             player_x = ti_rel_rect.width // 2
                             player_y = ti_rel_rect.height // 2
                             adjust_zoom(old_z, zoom_factor, player_x, player_y)
                         else:
-                            # Pivot on mouse position
                             local_x = event.pos[0] - tw_abs_rect.left - ti_rel_rect.left
                             local_y = event.pos[1] - tw_abs_rect.top - ti_rel_rect.top - EXTRA_TITLEBAR_HEIGHT
                             adjust_zoom(old_z, zoom_factor, local_x, local_y)
@@ -707,14 +854,13 @@ while running:
                                 panning = True
                                 pan_start_pos = event.pos
                                 follow_player = False
-                    elif main_area.collidepoint(event.pos):
+                    elif main_area.collidepoint(event.pos) and belt_mode != "none":
                         if not belt_mode_active:
                             belt_mode_active = True
                             belt_dragging = True
                             belt_drag_start_x = event.pos[0]
                             belt_offset = None
                             belt_surfaces = []
-                            belt_surfaces_faded = []
                         else:
                             belt_dragging = True
                             belt_drag_start_x = event.pos[0]
@@ -746,10 +892,24 @@ while running:
             if event.ui_element == pan_effect_toggle:
                 pan_effect_enabled = not pan_effect_enabled
                 pan_effect_toggle.set_text("Pan Effect: On" if pan_effect_enabled else "Pan Effect: Off")
-            elif event.ui_element == belt_fade_toggle:
-                belt_fade_enabled = not belt_fade_enabled
-                belt_fade_toggle.set_text("Belt Fade: On" if belt_fade_enabled else "Belt Fade: Off")
-                belt_surfaces_faded = []
+            elif event.ui_element == belt_normal_toggle and belt_mode != "normal":
+                belt_mode = "normal"
+                belt_normal_toggle.set_text("Belt Normal: On")
+                belt_faded_toggle.set_text("Belt Faded: Off")
+                belt_surfaces = []
+                belt_mode_active = False
+                main_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
+                preload_belt_normal_images(max_memory_mb=14000, belt_height=main_area.height)
+                print("[view_page] Belt Normal mode enabled")
+            elif event.ui_element == belt_faded_toggle and belt_mode != "faded":
+                belt_mode = "faded"
+                belt_normal_toggle.set_text("Belt Normal: Off")
+                belt_faded_toggle.set_text("Belt Faded: On")
+                belt_surfaces = []
+                belt_mode_active = False
+                main_area = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
+                preload_belt_faded_images(max_memory_mb=14000, belt_height=main_area.height)
+                print("[view_page] Belt Faded mode enabled")
             elif event.ui_element == sound_effects_toggle:
                 sound_effects_enabled = not sound_effects_enabled
                 sound_effects_toggle.set_text("Sound Effects: On" if sound_effects_enabled else "Sound Effects: Off")
@@ -816,7 +976,8 @@ while running:
             if settings_popup and event.ui_element == settings_popup:
                 settings_popup = None
                 pan_effect_toggle = None
-                belt_fade_toggle = None
+                belt_normal_toggle = None
+                belt_faded_toggle = None
                 sound_effects_toggle = None
                 gamepad_toggle = None
             elif tile_window and event.ui_element == tile_window:
@@ -855,7 +1016,6 @@ while running:
             else:
                 belt_view_fraction = None
             belt_surfaces = []
-            belt_surfaces_faded = []
             belt_offset = None
             last_tile_coord = current_tile_coord
 
@@ -867,9 +1027,12 @@ while running:
                 belt_surfaces = []
                 for i in range(len(current_tile.image_filenames)):
                     key = (current_tile_coord[0], current_tile_coord[1], i)
-                    if key in tile_image_cache:
-                        surf = tile_image_cache[key]
-                        belt_surfaces.append((surf, surf.get_width()))
+                    belt_normal_key = (current_tile_coord[0], current_tile_coord[1], i, "belt_normal")
+                    belt_faded_key = (current_tile_coord[0], current_tile_coord[1], i, "belt_faded")
+                    if belt_mode == "faded" and belt_faded_key in tile_image_cache:
+                        surf = tile_image_cache[belt_faded_key]
+                    elif belt_mode == "normal" and belt_normal_key in tile_image_cache:
+                        surf = tile_image_cache[belt_normal_key]
                     else:
                         cv2_img = current_tile.get_current_image(i)
                         if cv2_img is not None:
@@ -879,8 +1042,13 @@ while running:
                             new_h = main_area.height
                             scaled_cv2 = cv2.resize(cv2_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
                             surf = cv2_to_pygame(scaled_cv2)
-                            belt_surfaces.append((surf, new_w))
-                            tile_image_cache[key] = surf
+                            if belt_mode == "normal":
+                                tile_image_cache[belt_normal_key] = surf
+                            elif belt_mode == "faded":
+                                tile_image_cache[belt_normal_key] = surf
+                                surf = get_faded_surface(surf, OVERLAP_FRACTION)
+                                tile_image_cache[belt_faded_key] = surf
+                    belt_surfaces.append((surf, surf.get_width()))
 
             total_width = sum(w for (_, w) in belt_surfaces)
             if total_width == 0:
@@ -897,23 +1065,26 @@ while running:
                 viewport_left = belt_offset
                 viewport_right = viewport_left + main_area.width
 
-            normalized_offset = belt_offset % total_width if total_width > 0 else 0
+            # Normalize offset without abrupt jumps
+            normalized_offset = belt_offset
             if normalized_offset < 0:
                 normalized_offset += total_width
+            elif normalized_offset >= total_width:
+                normalized_offset -= total_width
             viewport_left = normalized_offset
             viewport_right = viewport_left + main_area.width
 
             image_positions = []
             x = 0
-            overlap = int(belt_surfaces[0][1] * OVERLAP_FRACTION) if belt_fade_enabled else 0
-            effective_widths = [w - overlap if belt_fade_enabled else w for (_, w) in belt_surfaces]
+            overlap = int(belt_surfaces[0][1] * OVERLAP_FRACTION) if belt_mode == "faded" else 0
+            effective_widths = [w - overlap if belt_mode == "faded" else w for (_, w) in belt_surfaces]
             total_effective_width = sum(effective_widths)
 
             for i in range(len(belt_surfaces)):
                 w = belt_surfaces[i][1]
                 effective_w = effective_widths[i]
                 image_left = x
-                image_right = x + w
+                image_right = x + w  # Use full width for visibility bounds
                 image_positions.append((i, image_left, image_right, w))
                 x += effective_w
 
@@ -926,29 +1097,22 @@ while running:
                     visible_right = min(adj_right, main_area.width)
                     visible_width = max(0, visible_right - visible_left)
                     if visible_width > 0:
-                        visibility_fraction = visible_width / w
-                        visible_images.append((i, adj_left, w, visibility_fraction))
-
-            visible_images.sort(key=lambda x: x[3], reverse=True)
-            visible_images = visible_images[:3]
-
-            if belt_fade_enabled:
-                if len(belt_surfaces_faded) != len(belt_surfaces):
-                    belt_surfaces_faded = [None] * len(belt_surfaces)
-                for idx, _, _, _ in visible_images:
-                    if belt_surfaces_faded[idx] is None or belt_surfaces_faded[idx][0].get_width() != belt_surfaces[idx][0].get_width():
-                        faded = get_faded_surface(belt_surfaces[idx][0], OVERLAP_FRACTION)
-                        if faded:
-                            belt_surfaces_faded[idx] = (faded, belt_surfaces[idx][1])
-                            print(f"[belt_mode] Generated fade for image {idx}")
-
-            for idx, pos_x, w, _ in visible_images:
-                surf_to_blit = (belt_surfaces_faded[idx][0] if belt_fade_enabled and belt_surfaces_faded[idx]
-                                else belt_surfaces[idx][0])
-                if surf_to_blit:
-                    screen.blit(surf_to_blit, (main_area.left + pos_x, main_area.top))
+                        # Center-based visibility to stabilize transitions
+                        center_x = (adj_left + adj_right) / 2
+                        viewport_center = main_area.width / 2
+                        distance_from_center = abs(center_x - viewport_center)
+                        visibility_score = visible_width / w * (1 - distance_from_center / main_area.width)
+                        visible_images.append((i, adj_left, w, visibility_score))
 
             if visible_images:
+                visible_images.sort(key=lambda x: x[3], reverse=True)
+                visible_images = visible_images[:3]
+
+                for idx, pos_x, w, _ in visible_images:
+                    surf_to_blit = belt_surfaces[idx][0]
+                    if surf_to_blit:
+                        screen.blit(surf_to_blit, (main_area.left + pos_x, main_area.top))
+
                 most_visible_idx = visible_images[0][0]
                 tile_system.player_direction = most_visible_idx % 8
                 tile_system.current_image_index = most_visible_idx % len(belt_surfaces)
