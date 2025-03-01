@@ -393,7 +393,6 @@ tile_system.load_image = load_image
 tile_system.cv2_to_pygame = cv2_to_pygame
 tile_system.SQUARE_SIZE = 36
 tile_system.initialize()
-tile_system.sub_grid_visible = False
 
 manager = pygame_gui.UIManager((screen_width, screen_height))
 bottom_bar_height = 60
@@ -531,7 +530,7 @@ def reset_map_view():
     scaled_sq = tile_system.SQUARE_SIZE * zoom_factor
     tile_system.map_offset[0] = tile_image_rect.width // 2 - tile_system.player_pos[1] * scaled_sq
     tile_system.map_offset[1] = tile_image_rect.height // 2 - tile_system.player_pos[0] * scaled_sq
-    print("[view_page] reset_map_view => map_offset updated for player pos")
+    print("[view_page] reset_map_view => map_offset updated for player pos:", tile_system.map_offset)
 
 def adjust_zoom(old_zoom, new_zoom, pivot_x, pivot_y):
     if tile_image is None:
@@ -566,15 +565,21 @@ def start_image_transition(key):
         return
     main_area_rect = pygame.Rect(10, 10, screen_width - 20, screen_height - bottom_bar_height - 20)
     ih_old, iw_old = old_cv2.shape[:2]
-    scale_factor_old = min(main_area_rect.width / iw_old, main_area_rect.height / ih_old)
+    sf_width_old = main_area_rect.width / iw_old
+    sf_height_old = main_area_rect.height / ih_old
+    scale_factor_old = min(sf_width_old, sf_height_old)
     new_w_old = int(iw_old * scale_factor_old)
     new_h_old = int(ih_old * scale_factor_old)
+    print(f"[Transition Old] Image: {iw_old}x{ih_old}, Scaled: {new_w_old}x{new_h_old}, Main Area: {main_area_rect.width}x{main_area_rect.height}")
     scaled_old_cv2 = cv2.resize(old_cv2, (new_w_old, new_h_old), interpolation=cv2.INTER_AREA)
     transition_old_surface = cv2_to_pygame(scaled_old_cv2)
     ih_new, iw_new = new_cv2.shape[:2]
-    scale_factor_new = min(main_area_rect.width / iw_new, main_area_rect.height / ih_new)
+    sf_width_new = main_area_rect.width / iw_new
+    sf_height_new = main_area_rect.height / ih_new
+    scale_factor_new = min(sf_width_new, sf_height_new)
     new_w_new = int(iw_new * scale_factor_new)
     new_h_new = int(ih_new * scale_factor_new)
+    print(f"[Transition New] Image: {iw_new}x{ih_new}, Scaled: {new_w_new}x{new_h_new}, Main Area: {main_area_rect.width}x{main_area_rect.height}")
     scaled_new_cv2 = cv2.resize(new_cv2, (new_w_new, new_h_new), interpolation=cv2.INTER_AREA)
     transition_new_surface = cv2_to_pygame(scaled_new_cv2)
     transition_start_time = pygame.time.get_ticks() / 1000.0
@@ -951,18 +956,18 @@ while running:
                         tile_image.set_image(tile_image_surf)
                         tile_window_bottom_bar.set_relative_position((0, new_h))
                         tile_window_bottom_bar.set_dimensions((new_w, tile_window_bottom_bar_height))
+                        reset_map_view()  # Center the player after maximizing
+                        print("[view_page] Map maximized and view centered on player")
                     else:
-                        maximize_button.set_text("Maximize")
-                        tile_window.set_relative_position((screen_width - tile_window_width - 10, 10))
-                        tile_window.set_dimensions((tile_window_width, tile_window_height + tile_window_bottom_bar_height + EXTRA_TITLEBAR_HEIGHT))
-                        container = tile_window.get_container()
-                        container_size = container.get_size()
-                        tile_image_height = container_size[1] - tile_window_bottom_bar_height
-                        tile_image.set_dimensions((tile_window_width, tile_image_height))
-                        tile_image_surf = pygame.Surface((tile_window_width, tile_image_height), pygame.SRCALPHA)
-                        tile_image.set_image(tile_image_surf)
-                        tile_window_bottom_bar.set_relative_position((0, tile_image_height))
-                        tile_window_bottom_bar.set_dimensions((tile_window_width, tile_window_bottom_bar_height))
+                        tile_window.kill()
+                        tile_window = None
+                        tile_image = None
+                        reset_view_button = None
+                        maximize_button = None
+                        create_map_window()
+                        tile_window_maximized = False
+                        reset_map_view()  # Center the player after restoring
+                        print("[view_page] Map restored to normal size and view centered on player")
             elif event.ui_element == restore_tile_window_button:
                 if tile_window is None:
                     create_map_window()
@@ -1065,7 +1070,6 @@ while running:
                 viewport_left = belt_offset
                 viewport_right = viewport_left + main_area.width
 
-            # Normalize offset without abrupt jumps
             normalized_offset = belt_offset
             if normalized_offset < 0:
                 normalized_offset += total_width
@@ -1084,7 +1088,7 @@ while running:
                 w = belt_surfaces[i][1]
                 effective_w = effective_widths[i]
                 image_left = x
-                image_right = x + w  # Use full width for visibility bounds
+                image_right = x + w
                 image_positions.append((i, image_left, image_right, w))
                 x += effective_w
 
@@ -1097,7 +1101,6 @@ while running:
                     visible_right = min(adj_right, main_area.width)
                     visible_width = max(0, visible_right - visible_left)
                     if visible_width > 0:
-                        # Center-based visibility to stabilize transitions
                         center_x = (adj_left + adj_right) / 2
                         viewport_center = main_area.width / 2
                         distance_from_center = abs(center_x - viewport_center)
@@ -1127,8 +1130,12 @@ while running:
                     transition_active = False
                     final_surface = transition_new_surface
                     if final_surface is not None:
-                        rect = final_surface.get_rect(center=main_area.center)
-                        screen.blit(final_surface, rect.topleft)
+                        r = final_surface.get_rect(top=main_area.top, centerx=main_area.centerx)
+                        if r.bottom > main_area.bottom:
+                            r.bottom = main_area.bottom
+                        print(f"[Transition Final] Rect: top={r.top}, bottom={r.bottom}, main_area: top={main_area.top}, bottom={main_area.bottom}")
+                        subsurface = screen.subsurface(main_area)
+                        subsurface.blit(final_surface, (r.left - main_area.left, r.top - main_area.top))
                 else:
                     M_x, M_y = main_area.center
                     W = main_area.width
@@ -1139,10 +1146,17 @@ while running:
                         old_center_x = M_x + progress * W
                         new_center_x = M_x - W + progress * W
                     if transition_old_surface is not None and transition_new_surface is not None:
-                        old_rect = transition_old_surface.get_rect(center=(old_center_x, M_y))
-                        new_rect = transition_new_surface.get_rect(center=(new_center_x, M_y))
-                        screen.blit(transition_old_surface, old_rect.topleft)
-                        screen.blit(transition_new_surface, new_rect.topleft)
+                        old_rect = transition_old_surface.get_rect(top=main_area.top, centerx=old_center_x)
+                        if old_rect.bottom > main_area.bottom:
+                            old_rect.bottom = main_area.bottom
+                        print(f"[Transition Old] Rect: top={old_rect.top}, bottom={old_rect.bottom}")
+                        new_rect = transition_new_surface.get_rect(top=main_area.top, centerx=new_center_x)
+                        if new_rect.bottom > main_area.bottom:
+                            new_rect.bottom = main_area.bottom
+                        print(f"[Transition New] Rect: top={new_rect.top}, bottom={new_rect.bottom}")
+                        subsurface = screen.subsurface(main_area)
+                        subsurface.blit(transition_old_surface, (old_rect.left - main_area.left, old_rect.top - main_area.top))
+                        subsurface.blit(transition_new_surface, (new_rect.left - main_area.left, new_rect.top - main_area.top))
             else:
                 key = (current_tile_coord[0], current_tile_coord[1], tile_system.current_image_index)
                 if key in tile_image_cache:
@@ -1151,19 +1165,26 @@ while running:
                     img_cv2 = current_tile.get_current_image(tile_system.current_image_index)
                     if img_cv2 is not None:
                         ih, iw = img_cv2.shape[:2]
-                        sf = min(main_area.width / iw, main_area.height / ih)
+                        sf_width = main_area.width / iw
+                        sf_height = main_area.height / ih
+                        sf = min(sf_width, sf_height)
                         if sf <= 0:
                             sf = 1
                         new_w = int(iw * sf)
                         new_h = int(ih * sf)
+                        print(f"[Normal] Image: {iw}x{ih}, Scaled: {new_w}x{new_h}, Main Area: {main_area.width}x{main_area.height}")
                         scaled_cv2 = cv2.resize(img_cv2, (new_w, new_h), interpolation=cv2.INTER_AREA)
                         scaled_surf = cv2_to_pygame(scaled_cv2)
                         tile_image_cache[key] = scaled_surf
                     else:
                         scaled_surf = None
                 if scaled_surf:
-                    r = scaled_surf.get_rect(center=main_area.center)
-                    screen.blit(scaled_surf, r.topleft)
+                    r = scaled_surf.get_rect(top=main_area.top, centerx=main_area.centerx)
+                    if r.bottom > main_area.bottom:
+                        r.bottom = main_area.bottom
+                    print(f"[Normal] Rect: top={r.top}, bottom={r.bottom}, main_area: top={main_area.top}, bottom={main_area.bottom}")
+                    subsurface = screen.subsurface(main_area)
+                    subsurface.blit(scaled_surf, (r.left - main_area.left, r.top - main_area.top))
 
     manager.draw_ui(screen)
     pygame.display.flip()
