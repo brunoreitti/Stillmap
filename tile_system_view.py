@@ -1,9 +1,4 @@
 # tile_system_view.py
-#
-# This is the "map module" that mirrors tile_system.py's approach,
-# so the background won't drift and re-initializing the tile window
-# won't break anything.
-#
 import os
 import pygame
 import json
@@ -25,9 +20,7 @@ save_directory = "saves"
 
 map_offset = [0, 0]
 selected_tile = None
-# Set default to False to hide subgrid drawing
-sub_grid_visible = False
-
+# Removed sub_grid_visible since it’s no longer needed for rendering
 background_image = None
 background_image_path = None
 
@@ -74,7 +67,7 @@ class Tile:
         self.selected = False
         self.link_areas = {}
 
-        # 3x3 subgrid: center (1,1) is always occupied
+        # 3x3 subgrid: center (1,1) is always occupied (kept for backend)
         self.subgrid_occupied = [[False]*3 for _ in range(3)]
         self.subgrid_occupied[1][1] = True
 
@@ -149,19 +142,9 @@ class Tile:
 
         pygame.draw.rect(surface, color, rect, 3 if highlight else 1)
 
-        if sub_grid_visible:
-            sub_s = scaled_size / 3
-            for i in range(1, 3):
-                pygame.draw.line(surface, color,
-                                 (rect.left, rect.top + i * sub_s),
-                                 (rect.right, rect.top + i * sub_s), 1)
-            for j in range(1, 3):
-                pygame.draw.line(surface, color,
-                                 (rect.left + j * sub_s, rect.top),
-                                 (rect.left + j * sub_s, rect.bottom), 1)
-
-            if self.selected:
-                pygame.draw.rect(surface, (255, 0, 0), rect, 3)
+        # Removed subgrid drawing logic
+        if self.selected:
+            pygame.draw.rect(surface, (255, 0, 0), rect, 3)
 
 def initialize():
     if not os.path.exists(save_directory):
@@ -456,7 +439,7 @@ def serialize_game_state():
         "player_direction": player_direction,
         "tiles": [],
         "background_image_path": background_image_path,
-        "grid_visible": sub_grid_visible,
+        # Removed "grid_visible" from serialization
         "map_offset": list(map_offset),
         "vector_lines": []
     }
@@ -496,14 +479,13 @@ def serialize_game_state():
     return out
 
 def load_game_state_from_dict(game_state):
-    global player_pos, player_direction, sub_grid_visible, map_offset
+    global player_pos, player_direction, map_offset
     global background_image, background_image_path, vector_lines, tiles, selected_tile
     global current_image_index
 
     try:
         player_pos[:] = game_state["player_position"]
         player_direction = game_state["player_direction"]
-        sub_grid_visible = game_state.get("grid_visible", False)
         map_offset[:] = game_state.get("map_offset", [0, 0])
         background_image_path = game_state.get("background_image_path", None)
 
@@ -580,7 +562,7 @@ def get_subgrid_square_at_pixel(x, y, offset_x, offset_y, zoom_factor):
 __all__ = [
     "tiles", "player_pos", "player_direction", "edit_mode", "json_link_mode", "clear_json_link_mode",
     "link_area_mode", "current_image_index", "current_loaded_file", "save_directory", "map_offset",
-    "selected_tile", "sub_grid_visible", "background_image", "background_image_path", "history",
+    "selected_tile", "background_image", "background_image_path", "history",
     "history_index", "max_history_length", "WHITE", "BLUE", "BLACK", "bring_window_to_front",
     "load_image", "cv2_to_pygame", "SQUARE_SIZE", "vector_lines", "VectorLine", "find_vector_with_end_point",
     "Tile", "initialize", "get_tile", "create_tile", "delete_tile", "get_current_tile",
