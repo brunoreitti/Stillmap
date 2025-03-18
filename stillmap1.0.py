@@ -5,69 +5,112 @@ import sys
 import os
 import json
 from tkinter import Tk, filedialog, simpledialog, messagebox
+import cv2
+import numpy as np
+import cairosvg
 
-# Initialize Pygame and Pygame GUI
 pygame.init()
 
-# Create a resizable Pygame window
 screen = pygame.display.set_mode((800, 600), pygame.RESIZABLE)
-pygame.display.set_caption("Checkerboard Game")
+pygame.display.set_caption("Image Path")
 
-# Get the handle of the Pygame window
+# Set the window icon
+icon = pygame.image.load('mappiclogo.ico')
+pygame.display.set_icon(icon)
+
 window_handle = pygame.display.get_wm_info()["window"]
-
-# Define constants for Windows messages
 SW_MAXIMIZE = 3
-
-# Define the user32 library for sending messages to the window
 user32 = ctypes.windll.user32
-
-# Maximize the window
 user32.ShowWindow(window_handle, SW_MAXIMIZE)
-
-# Get the screen dimensions after maximizing
 screen_width, screen_height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 
-# Constants
-BOARD_SIZE = 300  # Size of the board
-ROWS, COLS = 9, 9  # Size of the board
-SQUARE_SIZE = BOARD_SIZE // COLS  # Size of each square
-SIDEBAR_WIDTH = BOARD_SIZE + 20  # Width of the sidebar to house the board and button
-NUM_BOARDS = 3  # Number of 9x9 boards in each direction (3x3 grid)
+# Reserve space for the Windows taskbar (adjustable)
+TASKBAR_HEIGHT = 60
+effective_screen_height = screen_height - TASKBAR_HEIGHT
 
-# Colors
+BOARD_SIZE = 300
+ROWS, COLS = 9, 9
+SQUARE_SIZE = BOARD_SIZE // COLS
+SIDEBAR_WIDTH = BOARD_SIZE + 20
+NUM_BOARDS = 3
+
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
 GRAY = (200, 200, 200)
 LIGHT_GRAY = (220, 220, 220)
 DARK_GRAY = (50, 50, 50)
 BLUE = (0, 0, 255)
-MAIN_BG_COLOR = (50, 50, 50)
-SIDEBAR_BG_COLOR = (150, 150, 150)
-IMAGE_BG_COLOR = (100, 100, 100)
+BUTTON_GRAY = (77, 77, 77)
+LIGHTER_BLUE = (68, 71, 90)
+MAIN_BG_COLOR = (68, 71, 90)
+SIDEBAR_BG_COLOR = (50, 50, 50)
+IMAGE_BG_COLOR = (40, 42, 54)
+SEPARATOR_COLOR = (120, 120, 120)
+SIDEBAR_BORDER_COLOR = (120, 120, 120)
+GRID_COLOR = (100, 100, 200)
 
-# Player's starting position in the center of the middle board
 player_pos = [ROWS // 2, COLS // 2]
 player_direction = 0
-
-# Track which 9x9 board the player is currently in (starting in the center of the larger grid)
 current_board = [NUM_BOARDS // 2, NUM_BOARDS // 2]
-
-# Edit mode toggle
 edit_mode = False
-
-# Initialize Tkinter root and hide the main window
 root = Tk()
 root.withdraw()
-
-# Image management
 current_image_index = 0
-
-# Define the directory to save and load the game state JSON files
 save_directory = "saved_game_states"
 os.makedirs(save_directory, exist_ok=True)
+
+DEFAULT_IMAGE_PATH = 'earthscanlogo3.svg'
+default_image_cv2 = None
+
+def load_image(filepath):
+    try:
+        _, ext = os.path.splitext(filepath)
+        ext = ext.lower()
+        if ext == '.svg':
+            return load_svg_image(filepath)
+        else:
+            image = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)
+            if image is None:
+                raise ValueError("Image not found or unable to load")
+            return image
+    except Exception as e:
+        print(f"Failed to load image {filepath}: {e}")
+        return None
+
+def cv2_to_pygame(image):
+    if image.shape[2] == 4:
+        image_rgba = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
+        return pygame.image.frombuffer(image_rgba.tobytes(), image_rgba.shape[1::-1], 'RGBA')
+    else:
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return pygame.image.frombuffer(image_rgb.tobytes(), image_rgb.shape[1::-1], 'RGB')
+
+def load_svg_image(svg_path, output_width=None, output_height=None):
+    try:
+        png_data = cairosvg.svg2png(url=svg_path, output_width=output_width, output_height=output_height)
+        nparr = np.frombuffer(png_data, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+        return image
+    except Exception as e:
+        print(f"Failed to load SVG {svg_path}: {e}")
+        return None
+
+default_image_cv2 = load_image(DEFAULT_IMAGE_PATH)
+if default_image_cv2 is None:
+    print(f"Failed to load default image from {DEFAULT_IMAGE_PATH}")
+
+def display_image(current_image, display_area):
+    if current_image is not None:
+        img_height, img_width = current_image.shape[:2]
+        scale_factor = min(display_area.width / img_width, display_area.height / img_height)
+        new_width = int(img_width * scale_factor)
+        new_height = int(img_height * scale_factor)
+        scaled_image = cv2.resize(current_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        scaled_image_pygame = cv2_to_pygame(scaled_image)
+        image_rect = scaled_image_pygame.get_rect(center=display_area.center)
+        screen.blit(scaled_image_pygame, image_rect.topleft)
+        return image_rect
+    return None
 
 def load_images_from_directory(directory):
     images = []
@@ -90,8 +133,8 @@ class Tile:
         self.col = col
         self.size = size
         self.rect = pygame.Rect(col * size, row * size, size, size)
-        self.color = WHITE
-        self.active = True  # Tile is active (can be moved to)
+        self.color = LIGHTER_BLUE
+        self.active = True
         self.image = None
         self.directory = None
         self.images = []
@@ -102,13 +145,13 @@ class Tile:
         if adjusted_rect.collidepoint(mouse_pos) and edit_mode:
             self.color = LIGHT_GRAY
         else:
-            self.color = WHITE if self.active else DARK_GRAY
+            self.color = LIGHTER_BLUE if self.active else BLACK
         pygame.draw.rect(screen, self.color, adjusted_rect)
-        pygame.draw.rect(screen, BLACK, adjusted_rect, 1)
+        pygame.draw.rect(screen, GRID_COLOR, adjusted_rect, 1)
 
     def toggle_active(self):
         self.active = not self.active
-        self.color = WHITE if self.active else BLACK
+        self.color = LIGHTER_BLUE if self.active else BLACK
 
     def set_directory(self, directory):
         self.directory = directory
@@ -120,7 +163,6 @@ class Tile:
         self.images = []
         self.image_filenames = []
 
-# Create the board with Tile objects for each 9x9 grid in the 3x3 grid
 boards = [[[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS)] for _ in range(NUM_BOARDS)]
 
 def get_board(board_index):
@@ -141,101 +183,59 @@ def draw_board(mouse_pos, offset_x, offset_y):
 
 def draw_player(offset_x, offset_y):
     player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE).move(offset_x, offset_y)
-    pygame.draw.rect(screen, GREEN, player_rect)
-    
-    # Draw direction arrow
+    pygame.draw.rect(screen, SIDEBAR_BG_COLOR, player_rect)
     center_x = player_rect.centerx
     center_y = player_rect.centery
     arrow_length = SQUARE_SIZE // 2
-    
-    if player_direction == 0:  # Up
-        pygame.draw.polygon(screen, RED, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
-    elif player_direction == 1:  # Up-right
-        pygame.draw.polygon(screen, RED, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
-    elif player_direction == 2:  # Right
-        pygame.draw.polygon(screen, RED, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
-    elif player_direction == 3:  # Down-right
-        pygame.draw.polygon(screen, RED, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
-    elif player_direction == 4:  # Down
-        pygame.draw.polygon(screen, RED, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
-    elif player_direction == 5:  # Down-left
-        pygame.draw.polygon(screen, RED, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
-    elif player_direction == 6:  # Left
-        pygame.draw.polygon(screen, RED, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
-    elif player_direction == 7:  # Up-left
-        pygame.draw.polygon(screen, RED, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
-
+    if player_direction == 0:
+        pygame.draw.polygon(screen, WHITE, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+    elif player_direction == 1:
+        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
+    elif player_direction == 2:
+        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+    elif player_direction == 3:
+        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
+    elif player_direction == 4:
+        pygame.draw.polygon(screen, WHITE, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+    elif player_direction == 5:
+        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
+    elif player_direction == 6:
+        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+    elif player_direction == 7:
+        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
 
 def move_player(forward=True):
     global current_board
-
     new_pos = player_pos[:]
-    direction = player_direction if forward else (player_direction + 4) % 8  # Adjust direction for backward movement
-
-    if direction == 0:  # Up
-        new_pos[0] -= 1
-    elif direction == 1:  # Up-right
-        new_pos[0] -= 1
-        new_pos[1] += 1
-    elif direction == 2:  # Right
-        new_pos[1] += 1
-    elif direction == 3:  # Down-right
-        new_pos[0] += 1
-        new_pos[1] += 1
-    elif direction == 4:  # Down
-        new_pos[0] += 1
-    elif direction == 5:  # Down-left
-        new_pos[0] += 1
-        new_pos[1] -= 1
-    elif direction == 6:  # Left
-        new_pos[1] -= 1
-    elif direction == 7:  # Up-left
-        new_pos[0] -= 1
-        new_pos[1] -= 1
-
+    direction = player_direction if forward else (player_direction + 4) % 8
+    if direction == 0: new_pos[0] -= 1
+    elif direction == 1: new_pos[0] -= 1; new_pos[1] += 1
+    elif direction == 2: new_pos[1] += 1
+    elif direction == 3: new_pos[0] += 1; new_pos[1] += 1
+    elif direction == 4: new_pos[0] += 1
+    elif direction == 5: new_pos[0] += 1; new_pos[1] -= 1
+    elif direction == 6: new_pos[1] -= 1
+    elif direction == 7: new_pos[0] -= 1; new_pos[1] -= 1
     new_board = current_board[:]
-    print(f"Attempting to move to position: {new_pos} on board: {new_board}")
-
-    # Check for board transitions
     if new_pos[0] < 0:
-        if current_board[0] > 0:
-            new_pos[0] = ROWS - 1
-            new_board[0] -= 1
-        else:
-            new_pos[0] = 0
+        if current_board[0] > 0: new_pos[0] = ROWS - 1; new_board[0] -= 1
+        else: new_pos[0] = 0
     elif new_pos[0] >= ROWS:
-        if current_board[0] < NUM_BOARDS - 1:
-            new_pos[0] = 0
-            new_board[0] += 1
-        else:
-            new_pos[0] = ROWS - 1
+        if current_board[0] < NUM_BOARDS - 1: new_pos[0] = 0; new_board[0] += 1
+        else: new_pos[0] = ROWS - 1
     if new_pos[1] < 0:
-        if current_board[1] > 0:
-            new_pos[1] = COLS - 1
-            new_board[1] -= 1
-        else:
-            new_pos[1] = 0
+        if current_board[1] > 0: new_pos[1] = COLS - 1; new_board[1] -= 1
+        else: new_pos[1] = 0
     elif new_pos[1] >= COLS:
-        if current_board[1] < NUM_BOARDS - 1:
-            new_pos[1] = 0
-            new_board[1] += 1
-        else:
-            new_pos[1] = COLS - 1
-
-    # Check if the new position is in an active tile
+        if current_board[1] < NUM_BOARDS - 1: new_pos[1] = 0; new_board[1] += 1
+        else: new_pos[1] = COLS - 1
     if new_board != current_board:
         if get_board(new_board[0] * NUM_BOARDS + new_board[1])[new_pos[0]][new_pos[1]].active:
             current_board[:] = new_board
             player_pos[:] = new_pos
-            print(f"Moved to new board: {new_board}, new position: {new_pos}")
-        else:
-            print("Cannot move to inactive tile.")
     else:
         if get_current_board()[new_pos[0]][new_pos[1]].active:
             player_pos[:] = new_pos
-            print(f"Moved to position: {new_pos}")
-        else:
-            print("Cannot move to inactive tile.")
 
 def rotate_player(key):
     global player_direction, current_image_index
@@ -249,20 +249,17 @@ def rotate_player(key):
 def toggle_edit_mode():
     global edit_mode
     edit_mode = not edit_mode
-    edit_button.set_text(f"Edit Mode: {'ON' if edit_mode else 'OFF'}")
+    top_container_buttons[0].set_text(f"Edit Mode: {'ON' if edit_mode else 'OFF'}")
 
 def remove_current_tile_folder():
     current_tile = get_current_tile()
     current_tile.clear_directory()
-    print(f"Removed folder association from the current tile.")
 
-# Functions to save and load the game state
 def save_game_state():
     filename = simpledialog.askstring("Save Game", "Enter the save file name:")
     if not filename:
         messagebox.showwarning("Save Game", "Save file name cannot be empty.")
         return
-
     filepath = os.path.join(save_directory, f"{filename}.json")
     game_state = {
         "player_position": player_pos,
@@ -270,7 +267,6 @@ def save_game_state():
         "current_board": current_board,
         "tiles": []
     }
-
     for board_row in boards:
         for board in board_row:
             for row in board:
@@ -285,44 +281,34 @@ def save_game_state():
                         "image_filenames": tile.image_filenames
                     }
                     game_state["tiles"].append(tile_data)
-
     with open(filepath, "w") as file:
         json.dump(game_state, file, indent=4)
-    print("Game state saved.")
 
 def load_game_state():
     files = [f for f in os.listdir(save_directory) if f.endswith(".json")]
     if not files:
         messagebox.showwarning("Load Game", "No saved games found.")
         return
-
     selected_file = filedialog.askopenfilename(
         title="Select a saved game",
         initialdir=save_directory,
         filetypes=[("JSON files", "*.json")]
     )
-
     if not selected_file:
         return
-
     global player_pos, player_direction, current_board, current_image_index
-
-    # Clear the current game state
     for board_row in boards:
         for board in board_row:
             for row in board:
                 for tile in row:
                     tile.active = True
                     tile.clear_directory()
-
     try:
         with open(selected_file, "r") as file:
             game_state = json.load(file)
-        
         player_pos = game_state["player_position"]
         player_direction = game_state["player_direction"]
         current_board = game_state["current_board"]
-
         for tile_data in game_state["tiles"]:
             board_index = tile_data["board_row"] * NUM_BOARDS + tile_data["board_col"]
             tile = boards[tile_data["board_row"]][tile_data["board_col"]][tile_data["row"]][tile_data["col"]]
@@ -331,84 +317,81 @@ def load_game_state():
             tile.image_filenames = tile_data["image_filenames"]
             if tile_data["directory"]:
                 tile.images, _ = load_images_from_directory(tile_data["directory"])
-                
         current_image_index = 0
-        print("Game state loaded.")
     except FileNotFoundError:
         print("No saved game state found.")
 
-def draw_current_tile_info():
-    font = pygame.font.Font(None, 24)
-    board_label = f"Board: ({current_board[0]}, {current_board[1]})"
-    tile_label = f"Tile: ({player_pos[0]}, {player_pos[1]})"
-
-    board_text = font.render(board_label, True, BLACK)
-    tile_text = font.render(tile_label, True, BLACK)
-
-    screen.blit(board_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 700))
-    screen.blit(tile_text, (screen_width - SIDEBAR_WIDTH + 10, screen_height - 670))
-
-def draw_file_list(current_tile):
-    font = pygame.font.Font(None, 24)
-    start_y = 730
-    for i, filename in enumerate(current_tile.image_filenames):
-        text_surface = font.render(filename, True, BLACK)
-        screen.blit(text_surface, (screen_width - SIDEBAR_WIDTH + 10, start_y + i * 30))
-
-# Setup pygame_gui manager
+# Sidebar button definitions
 manager = pygame_gui.UIManager((screen_width, screen_height))
 
-# Create GUI buttons
-edit_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, 10), (SIDEBAR_WIDTH - 20, 40)),
-    text="Edit Mode: OFF",
-    manager=manager
-)
+# Top container (map + Edit Mode button)
+top_container_buttons = [
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Edit Mode: OFF", manager=manager),
+]
 
-image_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) - 60), (SIDEBAR_WIDTH - 20, 40)),
-    text="Select Folder",
-    manager=manager
-)
-
-save_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2)), (SIDEBAR_WIDTH - 20, 40)),
-    text="Save Game",
-    manager=manager
-)
-
-load_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 60), (SIDEBAR_WIDTH - 20, 40)),
-    text="Load Game",
-    manager=manager
-)
-
-delete_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((screen_width - SIDEBAR_WIDTH + 10, (screen_height // 2) + 120), (SIDEBAR_WIDTH - 20, 40)),
-    text="Remove Folder",
-    manager=manager
-)
-
+# Bottom container (other buttons)
+bottom_container_buttons = [
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Select Folder", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Save Game", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Load Game", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Remove Folder", manager=manager),
+]
 
 clock = pygame.time.Clock()
 
-# Main game loop
 running = True
-selected_tile = None
 while running:
-    time_delta = clock.tick(60) / 1000.0  # Limits the frame rate to 60 FPS
-    screen.fill(MAIN_BG_COLOR)  # Fill the main area with the main background color
+    time_delta = clock.tick(60) / 1000.0
+    screen.fill(MAIN_BG_COLOR)
 
-    # Draw the sidebar background
-    sidebar_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH, 0, SIDEBAR_WIDTH, screen_height)
+    # Define sidebar rectangle
+    sidebar_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH - 10, 10, SIDEBAR_WIDTH, effective_screen_height - 20)
     pygame.draw.rect(screen, SIDEBAR_BG_COLOR, sidebar_rect)
+    pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, sidebar_rect, 1)
+
+    # Sidebar layout constants
+    sidebar_padding = 10
+    map_offset_x = sidebar_rect.left + sidebar_padding
+    map_offset_y = sidebar_rect.top + sidebar_padding
+    map_height = BOARD_SIZE
+    button_height = 40
+    separator_height = 2
+    separator_padding = 10 + button_height
+    button_width = SIDEBAR_WIDTH - 30
+    button_x_center = sidebar_rect.left + (SIDEBAR_WIDTH - button_width) // 2
+
+    # Top container: Map + Edit Mode button
+    top_container_height = map_height + sidebar_padding + button_height
+    edit_mode_button_y = map_offset_y + map_height + sidebar_padding
+    top_container_buttons[0].set_position(pygame.math.Vector2(button_x_center, edit_mode_button_y))
+
+    # Separator line
+    separator_y = map_offset_y + top_container_height + separator_padding
+    pygame.draw.line(screen, SEPARATOR_COLOR, (sidebar_rect.left + sidebar_padding, separator_y),
+                     (sidebar_rect.right - sidebar_padding, separator_y), separator_height)
+
+    # Bottom container: Remaining buttons
+    bottom_container_y_start = separator_y + separator_height + sidebar_padding
+    bottom_container_height = sidebar_rect.height - top_container_height - (2 * sidebar_padding) - separator_padding - separator_height - sidebar_padding
+    num_bottom_buttons = len(bottom_container_buttons)
+    if num_bottom_buttons > 0:
+        total_button_space = bottom_container_height - ((num_bottom_buttons - 1) * sidebar_padding)
+        button_spacing = total_button_space // num_bottom_buttons if total_button_space > 0 else sidebar_padding
+        for i, button in enumerate(bottom_container_buttons):
+            button_y = bottom_container_y_start + (i * (button_height + sidebar_padding))
+            button.set_position(pygame.math.Vector2(button_x_center, button_y))
+
+    # Define and draw main display area with border
+    image_display_area = pygame.Rect(10, 10, screen_width - SIDEBAR_WIDTH - 20, effective_screen_height - 20)
+    pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
+    pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, image_display_area, 1)  # Add 1-pixel border
 
     mouse_pos = pygame.mouse.get_pos()
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_e:  # Toggle edit mode with 'E' key
+            if event.key == pygame.K_e:
                 toggle_edit_mode()
             elif event.key == pygame.K_UP:
                 move_player(forward=True)
@@ -418,56 +401,42 @@ while running:
                 rotate_player(event.key)
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if edit_mode:
-                offset_x = screen_width - SIDEBAR_WIDTH + 10
-                offset_y = 60
-                board = get_current_board()
-                for row in board:
+                for row in get_current_board():
                     for tile in row:
-                        adjusted_rect = tile.rect.move(offset_x, offset_y)
+                        adjusted_rect = tile.rect.move(map_offset_x, map_offset_y)
                         if adjusted_rect.collidepoint(event.pos):
                             tile.toggle_active()
                             break
         elif event.type == pygame.USEREVENT:
             if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
-                if event.ui_element == edit_button:
+                if event.ui_element == top_container_buttons[0]:  # Edit Mode
                     toggle_edit_mode()
-                elif event.ui_element == image_button:
+                elif event.ui_element == bottom_container_buttons[0]:  # Select Folder
                     directory = open_file_explorer()
                     if directory:
-                        current_tile = get_current_tile()
-                        current_tile.set_directory(directory)
-                        current_image_index = 0  # Reset image index when a new folder is assigned
-                elif event.ui_element == save_button:
+                        get_current_tile().set_directory(directory)
+                        current_image_index = 0
+                elif event.ui_element == bottom_container_buttons[1]:  # Save Game
                     save_game_state()
-                elif event.ui_element == load_button:
+                elif event.ui_element == bottom_container_buttons[2]:  # Load Game
                     load_game_state()
-                elif event.ui_element == delete_button:
+                elif event.ui_element == bottom_container_buttons[3]:  # Remove Folder
                     remove_current_tile_folder()
-        
         manager.process_events(event)
 
     manager.update(time_delta)
 
-    offset_x = screen_width - SIDEBAR_WIDTH + 10
-    offset_y = 60
-
-    draw_board(mouse_pos, offset_x, offset_y)
-    draw_player(offset_x, offset_y)
+    draw_board(mouse_pos, map_offset_x, map_offset_y)
+    draw_player(map_offset_x, map_offset_y)
     current_tile = get_current_tile()
-    if current_tile.directory:
-        draw_file_list(current_tile)
 
-    # Draw the image display area
-    image_display_area = pygame.Rect(10, 10, screen_width - SIDEBAR_WIDTH - 20, screen_height - 20)
-    pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
+    display_image(default_image_cv2, image_display_area)
 
-    # Display the selected image if the current tile has images
     if current_tile.images:
         current_image = current_tile.images[current_image_index]
         scaled_image = pygame.transform.scale(current_image, (image_display_area.width, image_display_area.height))
         screen.blit(scaled_image, (image_display_area.x, image_display_area.y))
 
-    draw_current_tile_info()
     manager.draw_ui(screen)
 
     pygame.display.flip()
