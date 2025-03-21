@@ -59,7 +59,7 @@ current_image_index = 0
 save_directory = "saved_game_states"
 os.makedirs(save_directory, exist_ok=True)
 
-DEFAULT_IMAGE_PATH = 'earthscanlogo3.svg'
+DEFAULT_IMAGE_PATH = 'image_path_logo8.svg'
 default_image_cv2 = None
 
 def load_image(filepath):
@@ -180,6 +180,61 @@ def draw_board(mouse_pos, offset_x, offset_y):
     for row in board:
         for tile in row:
             tile.draw(screen, mouse_pos, offset_x, offset_y)
+
+def draw_all_boards(mouse_pos):
+    full_map_size = BOARD_SIZE * NUM_BOARDS
+    scale_factor = min(screen_width / full_map_size, effective_screen_height / full_map_size)
+    scaled_size = int(BOARD_SIZE * scale_factor)
+    scaled_square_size = scaled_size // COLS
+    offset_x = (screen_width - (scaled_size * NUM_BOARDS)) // 2
+    offset_y = (effective_screen_height - (scaled_size * NUM_BOARDS)) // 2
+
+    for board_row in range(NUM_BOARDS):
+        for board_col in range(NUM_BOARDS):
+            board = boards[board_row][board_col]
+            board_offset_x = offset_x + (board_col * scaled_size)
+            board_offset_y = offset_y + (board_row * scaled_size)
+            for row in board:
+                for tile in row:
+                    adjusted_rect = pygame.Rect(
+                        board_offset_x + (tile.col * scaled_square_size),
+                        board_offset_y + (tile.row * scaled_square_size),
+                        scaled_square_size,
+                        scaled_square_size
+                    )
+                    if adjusted_rect.collidepoint(mouse_pos) and edit_mode:
+                        tile.color = LIGHT_GRAY
+                    else:
+                        tile.color = LIGHTER_BLUE if tile.active else BLACK
+                    pygame.draw.rect(screen, tile.color, adjusted_rect)
+                    pygame.draw.rect(screen, GRID_COLOR, adjusted_rect, 1)
+            if board_row == current_board[0] and board_col == current_board[1]:
+                player_rect = pygame.Rect(
+                    board_offset_x + (player_pos[1] * scaled_square_size),
+                    board_offset_y + (player_pos[0] * scaled_square_size),
+                    scaled_square_size,
+                    scaled_square_size
+                )
+                pygame.draw.rect(screen, SIDEBAR_BG_COLOR, player_rect)
+                center_x = player_rect.centerx
+                center_y = player_rect.centery
+                arrow_length = scaled_square_size // 2
+                if player_direction == 0:
+                    pygame.draw.polygon(screen, WHITE, [(center_x, center_y - arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+                elif player_direction == 1:
+                    pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 5), (center_x + 5, center_y)])
+                elif player_direction == 2:
+                    pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+                elif player_direction == 3:
+                    pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 5), (center_x + 5, center_y)])
+                elif player_direction == 4:
+                    pygame.draw.polygon(screen, WHITE, [(center_x, center_y + arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+                elif player_direction == 5:
+                    pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y + arrow_length), (center_x - 5, center_y), (center_x, center_y + 5)])
+                elif player_direction == 6:
+                    pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+                elif player_direction == 7:
+                    pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y - arrow_length), (center_x - 5, center_y), (center_x, center_y - 5)])
 
 def draw_player(offset_x, offset_y):
     player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE).move(offset_x, offset_y)
@@ -324,9 +379,11 @@ def load_game_state():
 # Sidebar button definitions
 manager = pygame_gui.UIManager((screen_width, screen_height))
 
-# Top container (map + Edit Mode button)
+# Top container (map + Edit Mode button + Hide Sidebar button + Big Map button)
 top_container_buttons = [
     pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Edit Mode: OFF", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 100, 30), text="Hide Sidebar", manager=manager),  # Hide Sidebar button
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 100, 30), text="Big Map", manager=manager),  # Big Map button
 ]
 
 # Bottom container (other buttons)
@@ -340,53 +397,113 @@ bottom_container_buttons = [
 clock = pygame.time.Clock()
 
 running = True
+sidebar_visible = True  # Track sidebar visibility
+maximized = False  # Track maximized state
+
+def toggle_sidebar():
+    global sidebar_visible, maximized
+    sidebar_visible = not sidebar_visible
+    top_container_buttons[1].set_text("Show Sidebar" if not sidebar_visible else "Hide Sidebar")  # Update text dynamically
+    # Show/hide other buttons based on sidebar visibility, but only if not maximized
+    if not maximized:
+        top_container_buttons[0].set_position(pygame.math.Vector2(-1000, -1000) if not sidebar_visible else pygame.math.Vector2(button_x_center, edit_mode_button_y))
+        for i, button in enumerate(bottom_container_buttons):
+            button.set_position(pygame.math.Vector2(-1000, -1000) if not sidebar_visible else pygame.math.Vector2(button_x_center, bottom_container_y_start + (i * (button_height + sidebar_padding))))
+        top_container_buttons[2].set_position(pygame.math.Vector2(-1000, -1000) if not sidebar_visible else pygame.math.Vector2(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - 100, sidebar_rect.top + sidebar_padding))
+
+def toggle_maximize():
+    global maximized, sidebar_visible
+    maximized = not maximized
+    if maximized:
+        sidebar_visible = False  # Hide sidebar when maximized
+        top_container_buttons[1].set_position(pygame.math.Vector2(-1000, -1000))  # Hide Sidebar button
+        top_container_buttons[0].set_position(pygame.math.Vector2(-1000, -1000))  # Hide Edit Mode button
+        for button in bottom_container_buttons:
+            button.set_position(pygame.math.Vector2(-1000, -1000))  # Hide bottom buttons
+        top_container_buttons[2].set_position(pygame.math.Vector2(screen_width - 110, 10))  # Move Big Map button to top right
+        top_container_buttons[2].set_text("Normal View")  # Change text to indicate return to normal
+    else:
+        sidebar_visible = True  # Restore sidebar when unmaximized
+        top_container_buttons[1].set_position(pygame.math.Vector2(sidebar_rect.left + sidebar_padding, sidebar_rect.top + sidebar_padding))  # Restore Hide Sidebar button
+        top_container_buttons[0].set_position(pygame.math.Vector2(button_x_center, edit_mode_button_y))  # Restore Edit Mode button
+        for i, button in enumerate(bottom_container_buttons):
+            button.set_position(pygame.math.Vector2(button_x_center, bottom_container_y_start + (i * (button_height + sidebar_padding))))  # Restore bottom buttons
+        top_container_buttons[2].set_position(pygame.math.Vector2(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - 100, sidebar_rect.top + sidebar_padding))  # Restore Big Map button
+        top_container_buttons[2].set_text("Big Map")  # Restore original text
+
 while running:
     time_delta = clock.tick(60) / 1000.0
     screen.fill(MAIN_BG_COLOR)
 
     # Define sidebar rectangle
     sidebar_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH - 10, 10, SIDEBAR_WIDTH, effective_screen_height - 20)
-    pygame.draw.rect(screen, SIDEBAR_BG_COLOR, sidebar_rect)
-    pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, sidebar_rect, 1)
 
-    # Sidebar layout constants
-    sidebar_padding = 10
-    map_offset_x = sidebar_rect.left + sidebar_padding
-    map_offset_y = sidebar_rect.top + sidebar_padding
-    map_height = BOARD_SIZE
-    button_height = 40
-    separator_height = 2
-    separator_padding = 10 + button_height
-    button_width = SIDEBAR_WIDTH - 30
-    button_x_center = sidebar_rect.left + (SIDEBAR_WIDTH - button_width) // 2
-
-    # Top container: Map + Edit Mode button
-    top_container_height = map_height + sidebar_padding + button_height
-    edit_mode_button_y = map_offset_y + map_height + sidebar_padding
-    top_container_buttons[0].set_position(pygame.math.Vector2(button_x_center, edit_mode_button_y))
-
-    # Separator line
-    separator_y = map_offset_y + top_container_height + separator_padding
-    pygame.draw.line(screen, SEPARATOR_COLOR, (sidebar_rect.left + sidebar_padding, separator_y),
-                     (sidebar_rect.right - sidebar_padding, separator_y), separator_height)
-
-    # Bottom container: Remaining buttons
-    bottom_container_y_start = separator_y + separator_height + sidebar_padding
-    bottom_container_height = sidebar_rect.height - top_container_height - (2 * sidebar_padding) - separator_padding - separator_height - sidebar_padding
-    num_bottom_buttons = len(bottom_container_buttons)
-    if num_bottom_buttons > 0:
-        total_button_space = bottom_container_height - ((num_bottom_buttons - 1) * sidebar_padding)
-        button_spacing = total_button_space // num_bottom_buttons if total_button_space > 0 else sidebar_padding
-        for i, button in enumerate(bottom_container_buttons):
-            button_y = bottom_container_y_start + (i * (button_height + sidebar_padding))
-            button.set_position(pygame.math.Vector2(button_x_center, button_y))
-
-    # Define and draw main display area with border
-    image_display_area = pygame.Rect(10, 10, screen_width - SIDEBAR_WIDTH - 20, effective_screen_height - 20)
-    pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
-    pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, image_display_area, 1)  # Add 1-pixel border
-
+    # Get mouse position at the start of the loop
     mouse_pos = pygame.mouse.get_pos()
+
+    if maximized:
+        draw_all_boards(mouse_pos)
+    else:
+        if sidebar_visible:
+            # Draw sidebar
+            pygame.draw.rect(screen, SIDEBAR_BG_COLOR, sidebar_rect)
+            pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, sidebar_rect, 1)
+
+            # Sidebar layout constants
+            sidebar_padding = 10
+            map_offset_x = sidebar_rect.left + sidebar_padding
+            map_offset_y = sidebar_rect.top + sidebar_padding + 40  # Adjusted for button height
+            map_height = BOARD_SIZE
+            button_height = 40
+            separator_height = 2
+            separator_padding = 10 + button_height
+            button_width = SIDEBAR_WIDTH - 30
+            button_x_center = sidebar_rect.left + (SIDEBAR_WIDTH - button_width) // 2
+
+            # Top container: Map + Edit Mode button + Hide Sidebar/Big Map buttons
+            top_container_height = map_height + sidebar_padding + button_height + 40
+            edit_mode_button_y = map_offset_y + map_height + sidebar_padding
+            top_container_buttons[0].set_position(pygame.math.Vector2(button_x_center, edit_mode_button_y))
+            top_container_buttons[1].set_position(pygame.math.Vector2(sidebar_rect.left + sidebar_padding, sidebar_rect.top + sidebar_padding))  # Hide Sidebar on left
+            top_container_buttons[2].set_position(pygame.math.Vector2(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - 100, sidebar_rect.top + sidebar_padding))  # Big Map on right
+
+            # Separator line
+            separator_y = map_offset_y + top_container_height + separator_padding - 40
+            pygame.draw.line(screen, SEPARATOR_COLOR, (sidebar_rect.left + sidebar_padding, separator_y),
+                            (sidebar_rect.right - sidebar_padding, separator_y), separator_height)
+
+            # Bottom container: Remaining buttons
+            bottom_container_y_start = separator_y + separator_height + sidebar_padding
+            bottom_container_height = sidebar_rect.height - top_container_height - (2 * sidebar_padding) - separator_padding - separator_height - sidebar_padding
+            num_bottom_buttons = len(bottom_container_buttons)
+            if num_bottom_buttons > 0:
+                total_button_space = bottom_container_height - ((num_bottom_buttons - 1) * sidebar_padding)
+                button_spacing = total_button_space // num_bottom_buttons if total_button_space > 0 else sidebar_padding
+                for i, button in enumerate(bottom_container_buttons):
+                    button_y = bottom_container_y_start + (i * (button_height + sidebar_padding))
+                    button.set_position(pygame.math.Vector2(button_x_center, button_y))
+
+            # Draw the map and player
+            draw_board(mouse_pos, map_offset_x, map_offset_y)
+            draw_player(map_offset_x, map_offset_y)
+        else:
+            # Position the Hide Sidebar button at the top right of the main display area when sidebar is hidden
+            image_display_area = pygame.Rect(10, 10, screen_width - 20, effective_screen_height - 20)
+            top_container_buttons[1].set_position(pygame.math.Vector2(image_display_area.right - 110, image_display_area.top + sidebar_padding))
+
+        # Define and draw main display area with border
+        image_display_area = pygame.Rect(10, 10, screen_width - (SIDEBAR_WIDTH + 20 if sidebar_visible else 20), effective_screen_height - 20)
+        pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
+        pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, image_display_area, 1)
+
+        current_tile = get_current_tile()
+        display_image(default_image_cv2, image_display_area)
+
+        if current_tile.images:
+            current_image = current_tile.images[current_image_index]
+            scaled_image = pygame.transform.scale(current_image, (image_display_area.width, image_display_area.height))
+            screen.blit(scaled_image, (image_display_area.x, image_display_area.y))
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -400,43 +517,59 @@ while running:
             elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
                 rotate_player(event.key)
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if edit_mode:
-                for row in get_current_board():
-                    for tile in row:
-                        adjusted_rect = tile.rect.move(map_offset_x, map_offset_y)
-                        if adjusted_rect.collidepoint(event.pos):
-                            tile.toggle_active()
-                            break
+            if edit_mode and (sidebar_visible or maximized):
+                if maximized:
+                    full_map_size = BOARD_SIZE * NUM_BOARDS
+                    scale_factor = min(screen_width / full_map_size, effective_screen_height / full_map_size)
+                    scaled_size = int(BOARD_SIZE * scale_factor)
+                    scaled_square_size = scaled_size // COLS
+                    offset_x = (screen_width - (scaled_size * NUM_BOARDS)) // 2
+                    offset_y = (effective_screen_height - (scaled_size * NUM_BOARDS)) // 2
+                    for board_row in range(NUM_BOARDS):
+                        for board_col in range(NUM_BOARDS):
+                            board = boards[board_row][board_col]
+                            board_offset_x = offset_x + (board_col * scaled_size)
+                            board_offset_y = offset_y + (board_row * scaled_size)
+                            for row in board:
+                                for tile in row:
+                                    adjusted_rect = pygame.Rect(
+                                        board_offset_x + (tile.col * scaled_square_size),
+                                        board_offset_y + (tile.row * scaled_square_size),
+                                        scaled_square_size,
+                                        scaled_square_size
+                                    )
+                                    if adjusted_rect.collidepoint(event.pos):
+                                        tile.toggle_active()
+                                        break
+                elif sidebar_visible:
+                    for row in get_current_board():
+                        for tile in row:
+                            adjusted_rect = tile.rect.move(map_offset_x, map_offset_y)
+                            if adjusted_rect.collidepoint(event.pos):
+                                tile.toggle_active()
+                                break
         elif event.type == pygame.USEREVENT:
             if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
-                if event.ui_element == top_container_buttons[0]:  # Edit Mode
+                if event.ui_element == top_container_buttons[0] and sidebar_visible and not maximized:  # Edit Mode
                     toggle_edit_mode()
-                elif event.ui_element == bottom_container_buttons[0]:  # Select Folder
+                elif event.ui_element == top_container_buttons[1] and not maximized:  # Hide Sidebar
+                    toggle_sidebar()
+                elif event.ui_element == top_container_buttons[2]:  # Big Map
+                    toggle_maximize()
+                elif event.ui_element == bottom_container_buttons[0] and sidebar_visible and not maximized:  # Select Folder
                     directory = open_file_explorer()
                     if directory:
                         get_current_tile().set_directory(directory)
                         current_image_index = 0
-                elif event.ui_element == bottom_container_buttons[1]:  # Save Game
+                elif event.ui_element == bottom_container_buttons[1] and sidebar_visible and not maximized:  # Save Game
                     save_game_state()
-                elif event.ui_element == bottom_container_buttons[2]:  # Load Game
+                elif event.ui_element == bottom_container_buttons[2] and sidebar_visible and not maximized:  # Load Game
                     load_game_state()
-                elif event.ui_element == bottom_container_buttons[3]:  # Remove Folder
+                elif event.ui_element == bottom_container_buttons[3] and sidebar_visible and not maximized:  # Remove Folder
                     remove_current_tile_folder()
         manager.process_events(event)
 
     manager.update(time_delta)
-
-    draw_board(mouse_pos, map_offset_x, map_offset_y)
-    draw_player(map_offset_x, map_offset_y)
-    current_tile = get_current_tile()
-
-    display_image(default_image_cv2, image_display_area)
-
-    if current_tile.images:
-        current_image = current_tile.images[current_image_index]
-        scaled_image = pygame.transform.scale(current_image, (image_display_area.width, image_display_area.height))
-        screen.blit(scaled_image, (image_display_area.x, image_display_area.y))
-
     manager.draw_ui(screen)
 
     pygame.display.flip()
