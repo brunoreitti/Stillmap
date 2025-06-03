@@ -1,45 +1,41 @@
 import pygame
 import pygame_gui
-import ctypes
 import sys
 import os
 import json
+import platform
+import asyncio
+from PIL import Image, ExifTags, ImageOps
 from tkinter import Tk, filedialog, simpledialog, messagebox
 import cv2
 import numpy as np
 import cairosvg
-from PIL import Image, ExifTags, ImageOps
 from datetime import datetime
+import ctypes
 
 pygame.init()
+
+os.environ['SDL_VIDEO_WINDOW_POS'] = "0,0"
 
 screen = pygame.display.set_mode((800, 600), pygame.RESIZABLE)
 pygame.display.set_caption("Image Path")
 
-# Set the window icon
+if sys.platform == "win32":
+    hwnd = pygame.display.get_wm_info()['window']
+    SW_MAXIMIZE = 3
+    ctypes.windll.user32.ShowWindow(hwnd, SW_MAXIMIZE)
+
 icon = pygame.image.load('mappiclogo.ico')
 pygame.display.set_icon(icon)
 
-window_handle = pygame.display.get_wm_info()["window"]
-SW_MAXIMIZE = 3
-user32 = ctypes.windll.user32
-user32.ShowWindow(window_handle, SW_MAXIMIZE)
-screen_width, screen_height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-
-# Reserve space for the Windows taskbar (adjustable)
-TASKBAR_HEIGHT = 60
-effective_screen_height = screen_height - TASKBAR_HEIGHT
-
-BOARD_SIZE = 300
 ROWS, COLS = 9, 9
-SQUARE_SIZE = BOARD_SIZE // COLS
-SIDEBAR_WIDTH = BOARD_SIZE + 20
 NUM_BOARDS = 3
+FPS = 60
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 GRAY = (200, 200, 200)
-LIGHT_GRAY = (220, 220, 220)
+LIGHT_GRAY = (200, 200, 200)
 DARK_GRAY = (50, 50, 50)
 BLUE = (0, 0, 255)
 BUTTON_GRAY = (77, 77, 77)
@@ -50,7 +46,7 @@ IMAGE_BG_COLOR = (40, 42, 54)
 SEPARATOR_COLOR = (120, 120, 120)
 SIDEBAR_BORDER_COLOR = (120, 120, 120)
 GRID_COLOR = (100, 100, 200)
-CARD_BG_COLOR = (255, 255, 255)  # Fully opaque white to eliminate ghosting
+CARD_BG_COLOR = (255, 255, 255)
 
 player_pos = [ROWS // 2, COLS // 2]
 player_direction = 0
@@ -105,22 +101,17 @@ if default_image_cv2 is None:
 def display_image(current_image, display_area, is_pygame_surface=False):
     if current_image is not None:
         if is_pygame_surface:
-            # Handle Pygame surface (e.g., current_tile.images)
             img_width, img_height = current_image.get_size()
         else:
-            # Handle OpenCV image (e.g., default_image_cv2)
             img_height, img_width = current_image.shape[:2]
         
-        # Calculate scaling factor to preserve aspect ratio
         scale_factor = min(display_area.width / img_width, display_area.height / img_height)
         new_width = int(img_width * scale_factor)
         new_height = int(img_height * scale_factor)
 
         if is_pygame_surface:
-            # Scale Pygame surface
             scaled_image = pygame.transform.smoothscale(current_image, (new_width, new_height))
         else:
-            # Scale OpenCV image and convert to Pygame surface
             scaled_image_cv2 = cv2.resize(current_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
             scaled_image = cv2_to_pygame(scaled_image_cv2)
 
@@ -144,7 +135,6 @@ def open_file_explorer():
     directory = filedialog.askdirectory()
     return directory
 
-# Functions for photo organization and resizing with custom progress bar
 def get_image_date(image_path):
     try:
         with Image.open(image_path) as img:
@@ -160,10 +150,7 @@ def get_image_date(image_path):
 
 def resize_image(input_path, output_path, max_dimension=2400):
     with Image.open(input_path) as img:
-        # Correct the orientation according to EXIF data
         img = ImageOps.exif_transpose(img)
-        
-        # Preserve aspect ratio by scaling based on the larger dimension
         original_width, original_height = img.size
         if original_width > original_height:
             new_width = max_dimension
@@ -171,41 +158,30 @@ def resize_image(input_path, output_path, max_dimension=2400):
         else:
             new_height = max_dimension
             new_width = int(original_width * (max_dimension / original_height))
-        
-        # Resize the image with high-quality interpolation
         resized_image = img.resize((new_width, new_height), Image.LANCZOS)
-        
-        # Save the resized image with EXIF data
         resized_image.save(output_path, quality=95, exif=img.info.get('exif'))
 
 def organize_photos(input_directory, max_dimension=2400):
-    # Get all files in the input directory along with their creation dates
     files = []
     for f in os.listdir(input_directory):
         file_path = os.path.join(input_directory, f)
         if os.path.isfile(file_path):
-            # Try to get the EXIF date
             exif_date = get_image_date(file_path)
             if exif_date:
                 files.append((f, exif_date.timestamp()))
             else:
-                # Fall back to file system dates
                 creation_date = os.path.getctime(file_path)
                 modification_date = os.path.getmtime(file_path)
-                # Use the earliest date available
                 files.append((f, min(creation_date, modification_date)))
     
-    # Sort files by date
     files.sort(key=lambda x: x[1])
     sorted_files = [f[0] for f in files]
     total_files = len(sorted_files)
     
-    # Create output directory if not exists
     output_directory = os.path.join(input_directory, "organized_photos")
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
     
-    # Process files in batches of 8
     batch_size = 8
     processed_files = 0
     bar_width = 400
@@ -214,31 +190,28 @@ def organize_photos(input_directory, max_dimension=2400):
     bar_y = (effective_screen_height - bar_height) // 2
     progress_surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
     font = pygame.font.Font(None, 36)
-    console_font = pygame.font.Font(None, 18)  # Smaller font for console
+    console_font = pygame.font.Font(None, 18)
 
-    # Define the card background and shadow
     card_padding = 20
     card_width = bar_width + 2 * card_padding
-    card_height = bar_height + 180  # Height for console area
+    card_height = bar_height + 180
     card_x = (screen_width - card_width) // 2
     card_y = (effective_screen_height - card_height) // 2
     card_rect = pygame.Rect(card_x, card_y, card_width, card_height)
     shadow_offset = 5
     shadow_rect = pygame.Rect(card_x + shadow_offset, card_y + shadow_offset, card_width, card_height)
-    console_height = 100  # Space for console log
-    console_y = card_y + 90  # Below progress bar
-    console_rect = pygame.Rect(card_x + 5, console_y + 5, card_width - 10, console_height - 10)  # Inner text box
+    console_height = 100
+    console_y = card_y + 90
+    console_rect = pygame.Rect(card_x + 5, console_y + 5, card_width - 10, console_height - 10)
 
-    console_lines = []  # Store console log lines
-    animation_offset = 0  # For smooth upward movement
+    console_lines = []
+    animation_offset = 0
 
     for i in range(0, len(sorted_files), batch_size):
-        # Create a new folder for each batch
         folder_name = str((i // batch_size) + 1)
         new_folder_path = os.path.join(output_directory, folder_name)
         os.makedirs(new_folder_path, exist_ok=True)
         
-        # Rename, resize and move files into the new folder
         for j in range(batch_size):
             if i + j < len(sorted_files):
                 src_file = os.path.join(input_directory, sorted_files[i + j])
@@ -247,43 +220,35 @@ def organize_photos(input_directory, max_dimension=2400):
                 processed_files += 1
                 console_lines.append(f"Processed: {sorted_files[i + j]} -> {dst_file}")
                 
-                # Animate the new line appearance
-                for frame in range(3):  # Reduced to 3 frames for faster movement
-                    animation_offset = (3 - frame) * 3  # Move up 3 pixels per frame (faster)
+                for frame in range(3):
+                    animation_offset = (3 - frame) * 3
                     progress = processed_files / total_files
                     progress_width = int(bar_width * progress)
-                    progress_surface.fill((0, 0, 0, 0))  # Clear the entire surface
+                    progress_surface.fill((0, 0, 0, 0))
 
-                    # Draw shadow
                     pygame.draw.rect(progress_surface, (0, 0, 0, 50), shadow_rect, border_radius=10)
-
-                    # Draw card background with all corners rounded
                     pygame.draw.rect(progress_surface, CARD_BG_COLOR, card_rect, border_radius=10)
-
-                    # Draw progress bar with all corners rounded
                     bar_rect = pygame.Rect(bar_x, card_y + 60, bar_width, bar_height)
                     pygame.draw.rect(progress_surface, (100, 100, 100), bar_rect, border_radius=10)
                     pygame.draw.rect(progress_surface, (0, 255, 0), (bar_x, card_y + 60, progress_width, bar_height), border_radius=10)
 
-                    # Clear and redraw text area
                     text_clear_rect = pygame.Rect(card_x, card_y, card_width, 40)
                     progress_surface.fill(CARD_BG_COLOR, text_clear_rect)
                     main_text = font.render(f"Organizing Photos: {int(progress * 100)}%", True, (0, 0, 0))
                     main_text_rect = main_text.get_rect(center=(screen_width // 2, card_y + 40))
                     progress_surface.blit(main_text, main_text_rect)
 
-                    # Draw console text box
-                    pygame.draw.rect(progress_surface, (100, 100, 100), console_rect, 2)  # Text box border
-                    progress_surface.fill((0, 0, 0), console_rect)  # Clear inside text box
+                    pygame.draw.rect(progress_surface, (100, 100, 100), console_rect, 2)
+                    progress_surface.fill((0, 0, 0), console_rect)
 
                     line_height = console_font.get_height()
                     max_lines = (console_height - 10) // line_height
-                    visible_lines = console_lines[-max_lines:]  # Show only the last few lines
+                    visible_lines = console_lines[-max_lines:]
                     for idx, line in enumerate(reversed(visible_lines)):
                         console_text = console_font.render(line, True, (255, 255, 255))
                         text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height + animation_offset))
-                        if text_rect.top >= console_rect.top:  # Clip text to stay within text box
-                            if text_rect.right > console_rect.right:  # Clip horizontally if overflowing
+                        if text_rect.top >= console_rect.top:
+                            if text_rect.right > console_rect.right:
                                 clipped_text = line[:int((console_rect.right - text_rect.left) / (console_font.size('a')[0]))]
                                 console_text = console_font.render(clipped_text, True, (255, 255, 255))
                                 text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height + animation_offset))
@@ -291,45 +256,37 @@ def organize_photos(input_directory, max_dimension=2400):
 
                     screen.blit(progress_surface, (0, 0))
                     pygame.display.flip()
-                    pygame.time.wait(10)  # Reduced to 10ms for faster animation
+                    pygame.time.wait(10)
 
-                animation_offset = 0  # Reset animation offset after animation
+                animation_offset = 0
 
-        # Final update without animation for the last frame
         progress = processed_files / total_files
         progress_width = int(bar_width * progress)
-        progress_surface.fill((0, 0, 0, 0))  # Clear the entire surface
+        progress_surface.fill((0, 0, 0, 0))
 
-        # Draw shadow
         pygame.draw.rect(progress_surface, (0, 0, 0, 50), shadow_rect, border_radius=10)
-
-        # Draw card background with all corners rounded
         pygame.draw.rect(progress_surface, CARD_BG_COLOR, card_rect, border_radius=10)
-
-        # Draw progress bar with all corners rounded
         bar_rect = pygame.Rect(bar_x, card_y + 60, bar_width, bar_height)
         pygame.draw.rect(progress_surface, (100, 100, 100), bar_rect, border_radius=10)
         pygame.draw.rect(progress_surface, (0, 255, 0), (bar_x, card_y + 60, progress_width, bar_height), border_radius=10)
 
-        # Clear and redraw text area
         text_clear_rect = pygame.Rect(card_x, card_y, card_width, 40)
         progress_surface.fill(CARD_BG_COLOR, text_clear_rect)
         main_text = font.render(f"Organizing Photos: {int(progress * 100)}%", True, (0, 0, 0))
         main_text_rect = main_text.get_rect(center=(screen_width // 2, card_y + 40))
         progress_surface.blit(main_text, main_text_rect)
 
-        # Draw console text box
-        pygame.draw.rect(progress_surface, (100, 100, 100), console_rect, 2)  # Text box border
-        progress_surface.fill((0, 0, 0), console_rect)  # Clear inside text box
+        pygame.draw.rect(progress_surface, (100, 100, 100), console_rect, 2)
+        progress_surface.fill((0, 0, 0), console_rect)
 
         line_height = console_font.get_height()
         max_lines = (console_height - 10) // line_height
-        visible_lines = console_lines[-max_lines:]  # Show only the last few lines
+        visible_lines = console_lines[-max_lines:]
         for idx, line in enumerate(reversed(visible_lines)):
             console_text = console_font.render(line, True, (255, 255, 255))
             text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height))
-            if text_rect.top >= console_rect.top:  # Clip text to stay within text box
-                if text_rect.right > console_rect.right:  # Clip horizontally if overflowing
+            if text_rect.top >= console_rect.top:
+                if text_rect.right > console_rect.right:
                     clipped_text = line[:int((console_rect.right - text_rect.left) / (console_font.size('a')[0]))]
                     console_text = console_font.render(clipped_text, True, (255, 255, 255))
                     text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height))
@@ -338,17 +295,15 @@ def organize_photos(input_directory, max_dimension=2400):
         screen.blit(progress_surface, (0, 0))
         pygame.display.flip()
         
-        # Process events to keep GUI responsive
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return
             manager.process_events(event)
     
-    # Show the notification with a green checkmark and auto-dismiss after 4 seconds
     root = Tk()
     root.withdraw()
     root.iconbitmap('mappiclogo.ico')
-    root.after(4000, root.destroy)  # Auto-close after 4000ms (4 seconds)
+    root.after(4000, root.destroy)
     messagebox.showinfo(
         "Success",
         f"Photos successfully organized into:\n{output_directory}",
@@ -392,7 +347,7 @@ class Tile:
         self.images = []
         self.image_filenames = []
 
-boards = [[[[Tile(row, col, SQUARE_SIZE) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS)] for _ in range(NUM_BOARDS)]
+boards = [[[[Tile(row, col, 0) for col in range(COLS)] for row in range(ROWS)] for _ in range(NUM_BOARDS)] for _ in range(NUM_BOARDS)]
 
 def get_board(board_index):
     return boards[board_index // NUM_BOARDS][board_index % NUM_BOARDS]
@@ -410,7 +365,7 @@ def draw_board(mouse_pos, offset_x, offset_y):
         for tile in row:
             tile.draw(screen, mouse_pos, offset_x, offset_y)
 
-def draw_all_boards(mouse_pos):
+def draw_all_boards(mouse_pos, screen_width, screen_height, effective_screen_height):
     full_map_size = BOARD_SIZE * NUM_BOARDS
     scale_factor = min(screen_width / full_map_size, effective_screen_height / full_map_size)
     scaled_size = int(BOARD_SIZE * scale_factor)
@@ -465,12 +420,12 @@ def draw_all_boards(mouse_pos):
                 elif player_direction == 7:
                     pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y - arrow_length), (center_x - 5, center_y), (center_x, center_y - 5)])
 
-def draw_player(offset_x, offset_y):
-    player_rect = pygame.Rect(player_pos[1] * SQUARE_SIZE, player_pos[0] * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE).move(offset_x, offset_y)
+def draw_player(offset_x, offset_y, square_size):
+    player_rect = pygame.Rect(player_pos[1] * square_size, player_pos[0] * square_size, square_size, square_size).move(offset_x, offset_y)
     pygame.draw.rect(screen, SIDEBAR_BG_COLOR, player_rect)
     center_x = player_rect.centerx
     center_y = player_rect.centery
-    arrow_length = SQUARE_SIZE // 2
+    arrow_length = square_size // 2
     if player_direction == 0:
         pygame.draw.polygon(screen, WHITE, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
     elif player_direction == 1:
@@ -605,139 +560,159 @@ def load_game_state():
     except FileNotFoundError:
         print("No saved game state found.")
 
-# Sidebar button definitions
-manager = pygame_gui.UIManager((screen_width, screen_height))
+manager = pygame_gui.UIManager((800, 600))
 
-# Top container (map + Edit Mode button + Hide Sidebar button + Big Map button)
 top_container_buttons = [
-    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Edit Mode: OFF", manager=manager),
-    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 100, 30), text="Hide Sidebar", manager=manager),  # Hide Sidebar button
-    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 100, 30), text="Big Map", manager=manager),  # Big Map button
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Edit Mode: OFF", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 100, 40), text="Hide Sidebar", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 80, 40), text="Big Map", manager=manager),
 ]
 
-# Bottom container (other buttons)
 bottom_container_buttons = [
-    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Select Folder", manager=manager),
-    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Save Game", manager=manager),
-    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Load Game", manager=manager),
-    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Remove Folder", manager=manager),
-    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, SIDEBAR_WIDTH - 30, 40), text="Orga/derez", manager=manager),  # New button
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Select Folder", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Save Game", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Load Game", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Remove Folder", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Orga/derez", manager=manager),
 ]
 
-clock = pygame.time.Clock()
-
-running = True
-sidebar_visible = True  # Track sidebar visibility
-maximized = False  # Track maximized state
+sidebar_visible = True
+maximized = False
 
 def toggle_sidebar():
     global sidebar_visible, maximized
     sidebar_visible = not sidebar_visible
-    top_container_buttons[1].set_text("Show Sidebar" if not sidebar_visible else "Hide Sidebar")  # Update text dynamically
-    # Show/hide other buttons based on sidebar visibility, but only if not maximized
+    top_container_buttons[1].set_text("Show Sidebar" if not sidebar_visible else "Hide Sidebar")
     if not maximized:
-        top_container_buttons[0].set_position(pygame.math.Vector2(-1000, -1000) if not sidebar_visible else pygame.math.Vector2(button_x_center, edit_mode_button_y))
-        for i, button in enumerate(bottom_container_buttons):
-            button.set_position(pygame.math.Vector2(-1000, -1000) if not sidebar_visible else pygame.math.Vector2(button_x_center, bottom_container_y_start + (i * (button_height + sidebar_padding))))
-        top_container_buttons[2].set_position(pygame.math.Vector2(-1000, -1000) if not sidebar_visible else pygame.math.Vector2(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - 100, sidebar_rect.top + sidebar_padding))
+        update_button_positions()
 
 def toggle_maximize():
     global maximized, sidebar_visible
     maximized = not maximized
     if maximized:
-        sidebar_visible = False  # Hide sidebar when maximized
-        top_container_buttons[1].set_position(pygame.math.Vector2(-1000, -1000))  # Hide Sidebar button
-        top_container_buttons[0].set_position(pygame.math.Vector2(-1000, -1000))  # Hide Edit Mode button
+        sidebar_visible = False
+        top_container_buttons[1].set_position(pygame.math.Vector2(-1000, -1000))
+        top_container_buttons[0].set_position(pygame.math.Vector2(-1000, -1000))
         for button in bottom_container_buttons:
-            button.set_position(pygame.math.Vector2(-1000, -1000))  # Hide bottom buttons
-        top_container_buttons[2].set_position(pygame.math.Vector2(screen_width - 110, 10))  # Move Big Map button to top right
-        top_container_buttons[2].set_text("Normal View")  # Change text to indicate return to normal
+            button.set_position(pygame.math.Vector2(-1000, -1000))
+        top_container_buttons[2].set_position(pygame.math.Vector2(screen_width - 90, 10))
+        top_container_buttons[2].set_text("Normal View")
     else:
-        sidebar_visible = True  # Restore sidebar when unmaximized
-        top_container_buttons[1].set_position(pygame.math.Vector2(sidebar_rect.left + sidebar_padding, sidebar_rect.top + sidebar_padding))  # Restore Hide Sidebar button
-        top_container_buttons[0].set_position(pygame.math.Vector2(button_x_center, edit_mode_button_y))  # Restore Edit Mode button
-        for i, button in enumerate(bottom_container_buttons):
-            button.set_position(pygame.math.Vector2(button_x_center, bottom_container_y_start + (i * (button_height + sidebar_padding))))  # Restore bottom buttons
-        top_container_buttons[2].set_position(pygame.math.Vector2(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - 100, sidebar_rect.top + sidebar_padding))  # Restore Big Map button
-        top_container_buttons[2].set_text("Big Map")  # Restore original text
+        sidebar_visible = True
+        top_container_buttons[2].set_text("Big Map")
+        update_button_positions()
 
-while running:
-    time_delta = clock.tick(60) / 1000.0
+def update_button_positions():
+    button_width = SIDEBAR_WIDTH - (2 * sidebar_padding)
+    button_x_center = sidebar_rect.left + (SIDEBAR_WIDTH - button_width) // 2
+    edit_mode_button_y = map_offset_y + BOARD_SIZE + sidebar_padding
+    top_container_buttons[0].set_position(pygame.math.Vector2(button_x_center, edit_mode_button_y) if sidebar_visible and not maximized else pygame.math.Vector2(-1000, -1000))
+    top_container_buttons[0].set_dimensions((button_width, button_height) if sidebar_visible and not maximized else (120, 40))
+    if sidebar_visible and not maximized:
+        top_container_buttons[1].set_position(pygame.math.Vector2(sidebar_rect.left + sidebar_padding, sidebar_rect.top + sidebar_padding))
+    else:
+        button_x = image_display_area.right - 100 - 1 - 5
+        button_y = sidebar_padding
+        top_container_buttons[1].set_position(pygame.math.Vector2(button_x, button_y))
+    top_container_buttons[2].set_position(pygame.math.Vector2(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - 90, sidebar_rect.top + sidebar_padding) if sidebar_visible and not maximized else pygame.math.Vector2(-1000, -1000))
+    for i, button in enumerate(bottom_container_buttons):
+        button_y = bottom_container_y_start + (i * (button_height + sidebar_spacing))
+        button.set_position(pygame.math.Vector2(button_x_center, button_y) if sidebar_visible and not maximized else pygame.math.Vector2(-1000, -1000))
+        button.set_dimensions((button_width, button_height) if sidebar_visible and not maximized else (120, 40))
+
+async def setup():
+    global screen_width, screen_height, effective_screen_height, manager
+    screen_width, screen_height = screen.get_size()
+    effective_screen_height = screen_height
+    manager.set_window_resolution((screen_width, screen_height))
+
+async def update_loop():
+    global screen_width, screen_height, effective_screen_height
+
+    screen_width, screen_height = screen.get_size()
+    effective_screen_height = screen_height
+
+    manager.set_window_resolution((screen_width, screen_height))
+
+    global SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, button_height, separator_height, sidebar_gap
+    SIDEBAR_WIDTH = int(screen_width * 0.153)
+    sidebar_padding = 10
+    sidebar_spacing = 10
+    button_height = 40
+    separator_height = 2
+    sidebar_gap = 20
+
+    global sidebar_rect
+    sidebar_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH - sidebar_padding, sidebar_padding,
+                               SIDEBAR_WIDTH, effective_screen_height - (sidebar_padding * 2))
+
+    global map_offset_x, map_offset_y
+    map_offset_x = sidebar_rect.left + sidebar_padding
+    map_offset_y = sidebar_rect.top + sidebar_padding + button_height + sidebar_spacing
+
+    global BOARD_SIZE, SQUARE_SIZE
+    map_width = SIDEBAR_WIDTH - (2 * sidebar_padding)
+    map_height = map_width
+    BOARD_SIZE = map_height
+    SQUARE_SIZE = BOARD_SIZE // COLS
+
+    for board_row in boards:
+        for board in board_row:
+            for row in board:
+                for tile in row:
+                    tile.size = SQUARE_SIZE
+                    tile.rect = pygame.Rect(tile.col * SQUARE_SIZE, tile.row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE)
+
+    global separator_y
+    separator_y = map_offset_y + map_height + sidebar_spacing + button_height + sidebar_spacing
+
+    global bottom_container_y_start
+    bottom_container_y_start = separator_y + separator_height + sidebar_spacing
+
     screen.fill(MAIN_BG_COLOR)
 
-    # Define sidebar rectangle
-    sidebar_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH - 10, 10, SIDEBAR_WIDTH, effective_screen_height - 20)
-
-    # Get mouse position at the start of the loop
     mouse_pos = pygame.mouse.get_pos()
 
     if maximized:
-        draw_all_boards(mouse_pos)
+        draw_all_boards(mouse_pos, screen_width, screen_height, effective_screen_height)
     else:
         if sidebar_visible:
-            # Draw sidebar
             pygame.draw.rect(screen, SIDEBAR_BG_COLOR, sidebar_rect)
-            pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, sidebar_rect, 1)
 
-            # Sidebar layout constants
-            sidebar_padding = 10
-            map_offset_x = sidebar_rect.left + sidebar_padding
-            map_offset_y = sidebar_rect.top + sidebar_padding + 40  # Adjusted for button height
-            map_height = BOARD_SIZE
-            button_height = 40
-            separator_height = 2
-            separator_padding = 10 + button_height
-            button_width = SIDEBAR_WIDTH - 30
-            button_x_center = sidebar_rect.left + (SIDEBAR_WIDTH - button_width) // 2
-
-            # Top container: Map + Edit Mode button + Hide Sidebar/Big Map buttons
-            top_container_height = map_height + sidebar_padding + button_height + 40
-            edit_mode_button_y = map_offset_y + map_height + sidebar_padding
-            top_container_buttons[0].set_position(pygame.math.Vector2(button_x_center, edit_mode_button_y))
-            top_container_buttons[1].set_position(pygame.math.Vector2(sidebar_rect.left + sidebar_padding, sidebar_rect.top + sidebar_padding))  # Hide Sidebar on left
-            top_container_buttons[2].set_position(pygame.math.Vector2(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - 100, sidebar_rect.top + sidebar_padding))  # Big Map on right
-
-            # Separator line
-            separator_y = map_offset_y + top_container_height + separator_padding - 40
-            pygame.draw.line(screen, SEPARATOR_COLOR, (sidebar_rect.left + sidebar_padding, separator_y),
-                            (sidebar_rect.right - sidebar_padding, separator_y), separator_height)
-
-            # Bottom container: Remaining buttons
-            bottom_container_y_start = separator_y + separator_height + sidebar_padding
-            bottom_container_height = sidebar_rect.height - top_container_height - (2 * sidebar_padding) - separator_padding - separator_height - sidebar_padding
-            num_bottom_buttons = len(bottom_container_buttons)
-            if num_bottom_buttons > 0:
-                total_button_space = bottom_container_height - ((num_bottom_buttons - 1) * sidebar_padding)
-                button_spacing = total_button_space // num_bottom_buttons if total_button_space > 0 else sidebar_padding
-                for i, button in enumerate(bottom_container_buttons):
-                    button_y = bottom_container_y_start + (i * (button_height + sidebar_padding))
-                    button.set_position(pygame.math.Vector2(button_x_center, button_y))
-
-            # Draw the map and player
             draw_board(mouse_pos, map_offset_x, map_offset_y)
-            draw_player(map_offset_x, map_offset_y)
-        else:
-            # Position the Hide Sidebar button at the top right of the main display area when sidebar is hidden
-            image_display_area = pygame.Rect(10, 10, screen_width - 20, effective_screen_height - 20)
-            top_container_buttons[1].set_position(pygame.math.Vector2(image_display_area.right - 110, image_display_area.top + sidebar_padding))
+            draw_player(map_offset_x, map_offset_y, SQUARE_SIZE)
 
-        # Define and draw main display area with border
-        image_display_area = pygame.Rect(10, 10, screen_width - (SIDEBAR_WIDTH + 20 if sidebar_visible else 20), effective_screen_height - 20)
+            pygame.draw.line(screen, SEPARATOR_COLOR,
+                            (sidebar_rect.left + sidebar_padding, separator_y),
+                            (sidebar_rect.right - sidebar_padding, separator_y),
+                            separator_height)
+
+        global image_display_area
+        image_display_area = pygame.Rect(
+            sidebar_padding, 
+            sidebar_padding,
+            screen_width - (SIDEBAR_WIDTH + sidebar_padding + sidebar_gap if sidebar_visible else sidebar_padding * 2),
+            effective_screen_height - (sidebar_padding * 2)
+        )
         pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
         pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, image_display_area, 1)
 
         current_tile = get_current_tile()
-        # Display default image
         display_image(default_image_cv2, image_display_area, is_pygame_surface=False)
-
-        # Display current tile image with aspect ratio preserved
         if current_tile.images:
             current_image = current_tile.images[current_image_index]
             display_image(current_image, image_display_area, is_pygame_surface=True)
 
+    update_button_positions()
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False
+            pygame.quit()
+            sys.exit()
+        elif event.type == pygame.VIDEORESIZE:
+            screen_width, screen_height = event.w, event.h
+            effective_screen_height = screen_height
+            manager.set_window_resolution((screen_width, screen_height))
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_e:
                 toggle_edit_mode()
@@ -780,56 +755,65 @@ while running:
                                 tile.toggle_active()
                                 break
         elif event.type == pygame_gui.UI_BUTTON_PRESSED:
-            if event.ui_element == top_container_buttons[0] and sidebar_visible and not maximized:  # Edit Mode
+            if event.ui_element == top_container_buttons[0] and sidebar_visible and not maximized:
                 toggle_edit_mode()
-            elif event.ui_element == top_container_buttons[1] and not maximized:  # Hide Sidebar
+            elif event.ui_element == top_container_buttons[1] and not maximized:
                 toggle_sidebar()
-            elif event.ui_element == top_container_buttons[2]:  # Big Map
+            elif event.ui_element == top_container_buttons[2]:
                 toggle_maximize()
-            elif event.ui_element == bottom_container_buttons[0] and sidebar_visible and not maximized:  # Select Folder
+            elif event.ui_element == bottom_container_buttons[0] and sidebar_visible and not maximized:
                 directory = open_file_explorer()
                 if directory:
                     get_current_tile().set_directory(directory)
                     current_image_index = 0
-                    # Set focus back to the Pygame window
-                    user32.SetFocus(window_handle)
-            elif event.ui_element == bottom_container_buttons[1] and sidebar_visible and not maximized:  # Save Game
+            elif event.ui_element == bottom_container_buttons[1] and sidebar_visible and not maximized:
                 save_game_state()
-            elif event.ui_element == bottom_container_buttons[2] and sidebar_visible and not maximized:  # Load Game
+            elif event.ui_element == bottom_container_buttons[2] and sidebar_visible and not maximized:
                 load_game_state()
-                # Set focus back to the Pygame window
-                user32.SetFocus(window_handle)
-            elif event.ui_element == bottom_container_buttons[3] and sidebar_visible and not maximized:  # Remove Folder
+            elif event.ui_element == bottom_container_buttons[3] and sidebar_visible and not maximized:
                 remove_current_tile_folder()
-            elif event.ui_element == bottom_container_buttons[4] and sidebar_visible and not maximized:  # Orga/derez
+            elif event.ui_element == bottom_container_buttons[4] and sidebar_visible and not maximized:
                 directory = open_file_explorer()
                 if directory:
                     organize_photos(directory)
-                    # Restore GUI after processing
                     screen.fill(MAIN_BG_COLOR)
                     if not maximized and sidebar_visible:
                         pygame.draw.rect(screen, SIDEBAR_BG_COLOR, sidebar_rect)
-                        pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, sidebar_rect, 1)
                         draw_board(mouse_pos, map_offset_x, map_offset_y)
-                        draw_player(map_offset_x, map_offset_y)
-                    image_display_area = pygame.Rect(10, 10, screen_width - (SIDEBAR_WIDTH + 20 if sidebar_visible else 20), effective_screen_height - 20)
+                        draw_player(map_offset_x, map_offset_y, SQUARE_SIZE)
+                        pygame.draw.line(screen, SEPARATOR_COLOR,
+                                        (sidebar_rect.left + sidebar_padding, separator_y),
+                                        (sidebar_rect.right - sidebar_padding, separator_y),
+                                        separator_height)
+                    image_display_area = pygame.Rect(
+                        sidebar_padding, 
+                        sidebar_padding,
+                        screen_width - (SIDEBAR_WIDTH + sidebar_padding + sidebar_gap if sidebar_visible else sidebar_padding * 2),
+                        effective_screen_height - (sidebar_padding * 2)
+                    )
                     pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
                     pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, image_display_area, 1)
                     display_image(default_image_cv2, image_display_area, is_pygame_surface=False)
                     if current_tile.images:
                         current_image = current_tile.images[current_image_index]
                         display_image(current_image, image_display_area, is_pygame_surface=True)
-                    manager.update(time_delta)
+                    manager.update(1.0 / FPS)
                     manager.draw_ui(screen)
                     pygame.display.flip()
-                    # Set focus back to the Pygame window
-                    user32.SetFocus(window_handle)
         manager.process_events(event)
 
-    manager.update(time_delta)
+    manager.update(1.0 / FPS)
     manager.draw_ui(screen)
-
     pygame.display.flip()
 
-pygame.quit()
-sys.exit()
+async def main():
+    await setup()
+    while True:
+        await update_loop()
+        await asyncio.sleep(1.0 / FPS)
+
+if platform.system() == "Emscripten":
+    asyncio.ensure_future(main())
+else:
+    if __name__ == "__main__":
+        asyncio.run(main())
