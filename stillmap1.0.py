@@ -12,6 +12,8 @@ import numpy as np
 import cairosvg
 from datetime import datetime
 import ctypes
+from tkinter import TclError
+
 
 pygame.init()
 
@@ -25,7 +27,7 @@ if sys.platform == "win32":
     SW_MAXIMIZE = 3
     ctypes.windll.user32.ShowWindow(hwnd, SW_MAXIMIZE)
 
-icon = pygame.image.load('stillmap.ico')
+icon = pygame.image.load('ico1.ico')
 pygame.display.set_icon(icon)
 
 ROWS, COLS = 9, 9
@@ -56,8 +58,21 @@ edit_mode = False
 root = Tk()
 root.withdraw()
 current_image_index = 0
-save_directory = "saved_game_states"
-os.makedirs(save_directory, exist_ok=True)
+save_directory = os.path.join(os.getenv("LOCALAPPDATA"), "Stillmap", "saved_game_states")
+# Ensure the directory is created with appropriate permissions
+try:
+    os.makedirs(save_directory, exist_ok=True)
+    # Verify write access by creating a test file
+    test_file = os.path.join(save_directory, ".test_write_access")
+    with open(test_file, "w") as f:
+        f.write("test")
+    os.remove(test_file)
+except PermissionError:
+    messagebox.showerror("Permission Error", f"Cannot write to {save_directory}. Please run the application as a user with write access to %LOCALAPPDATA% or check security settings.")
+    sys.exit(1)
+except Exception as e:
+    messagebox.showerror("Error", f"Failed to set up save directory: {str(e)}")
+    sys.exit(1)
 
 # Global variable declarations
 screen_width = 800
@@ -338,16 +353,29 @@ def organize_photos(input_directory, max_dimension=2400):
                 return
             manager.process_events(event)
     
-    root = Tk()
-    root.withdraw()
-    root.iconbitmap('mappiclogo.ico')
-    root.after(4000, root.destroy)
-    messagebox.showinfo(
-        "Success",
-        f"Photos successfully organized into:\n{output_directory}",
-        icon='info',
-        parent=root
-    )
+    # Set icon and display success message with error handling
+    try:
+        root = Tk()
+        root.withdraw()
+        root.iconbitmap('ico1.ico')  # Updated to use ico1.ico
+        root.after(4000, root.destroy)
+        messagebox.showinfo(
+            "Success",
+            f"Photos successfully organized into:\n{output_directory}",
+            icon='info',
+            parent=root
+        )
+    except TclError:
+        messagebox.showinfo(
+            "Success",
+            f"Photos successfully organized into:\n{output_directory}\n(Note: Icon 'ico1.ico' could not be loaded.)",
+            icon='info'
+        )
+    except Exception as e:
+        messagebox.showinfo(
+            "Success",
+            f"Photos successfully organized into:\n{output_directory}\n(Note: An error occurred: {str(e)})"
+        )
 
 def restore_pygame_focus():
     if sys.platform == "win32":
@@ -591,8 +619,13 @@ def save_game_state():
                         "image_filenames": tile.image_filenames
                     }
                     game_state["tiles"].append(tile_data)
-    with open(filepath, "w") as file:
-        json.dump(game_state, file, indent=4)
+    try:
+        with open(filepath, "w") as file:
+            json.dump(game_state, file, indent=4)
+    except PermissionError:
+        messagebox.showerror("Permission Error", f"Cannot save game to {filepath}. Please ensure you have write access to {save_directory} or run as administrator.")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to save game: {str(e)}")
 
 def load_game_state():
     files = [f for f in os.listdir(save_directory) if f.endswith(".json")]
@@ -627,10 +660,14 @@ def load_game_state():
             tile.image_filenames = tile_data["image_filenames"]
             if tile_data["directory"]:
                 tile.images, _ = load_images_from_directory(tile_data["directory"])
-        current_image_index = player_direction if get_current_tile().images else 0  # Sync image index with player direction
-        restore_pygame_focus()  # Restore focus after loading
+        current_image_index = player_direction if get_current_tile().images else 0
+        restore_pygame_focus()
+    except PermissionError:
+        messagebox.showerror("Permission Error", f"Cannot load game from {selected_file}. Please ensure you have read access.")
     except FileNotFoundError:
-        print("No saved game state found.")
+        messagebox.showerror("Error", "Saved game file not found.")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to load game: {str(e)}")
 
 def show_info_dialog():
     global info_dialog, close_info_button
@@ -647,8 +684,8 @@ def show_info_dialog():
         text_box_rect = pygame.Rect(10, 10, dialog_width - 20, dialog_height - 80)
         pygame_gui.elements.UITextBox(
             html_text=(
-                "<b>Stillmap Software Version 1.0 â€” Legal Notice</b><br><br>"
-                "Â© 2025 Earth Scan Company. All rights reserved.<br><br>"
+                "<b>Stillmap Software Version 1.0 Ã¢â‚¬â€� Legal Notice</b><br><br>"
+                "Ã‚Â© 2025 Earth Scan Company. All rights reserved.<br><br>"
                 "This software is proprietary and developed solely by Earth Scan Company. "
                 "All content, code, and assets are protected by copyright. No part of this "
                 "software may be copied, modified, distributed, or reverse engineered without "
@@ -862,7 +899,6 @@ async def update_loop():
 
     update_button_positions()
 
-    # Draw text links
     hide_hovered = hide_rect.collidepoint(mouse_pos)
     map_hovered = map_rect.collidepoint(mouse_pos)
     info_hovered = info_rect.collidepoint(mouse_pos)
@@ -905,7 +941,7 @@ async def update_loop():
             elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
                 rotate_player(event.key)
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:  # Left click
+            if event.button == 1:
                 if hide_rect.collidepoint(event.pos) and not maximized:
                     toggle_sidebar()
                 elif map_rect.collidepoint(event.pos):
@@ -951,7 +987,7 @@ async def update_loop():
                 if directory:
                     get_current_tile().set_directory(directory)
                     current_image_index = 0
-                    restore_pygame_focus()  # Restore focus after setting folder
+                    restore_pygame_focus()
             elif event.ui_element == bottom_container_buttons[1] and sidebar_visible and not maximized:
                 save_game_state()
             elif event.ui_element == bottom_container_buttons[2] and sidebar_visible and not maximized:
