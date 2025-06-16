@@ -5,15 +5,110 @@ import os
 import json
 import platform
 import asyncio
+import uuid
+import hashlib
+import hmac
+import datetime
 from PIL import Image, ExifTags, ImageOps
 from tkinter import Tk, filedialog, simpledialog, messagebox
 import cv2
 import numpy as np
 import cairosvg
-from datetime import datetime
 import ctypes
 from tkinter import TclError
 
+# Embedded secret key (to be obfuscated with PyArmor)
+SECRET_KEY = b"secret key 32 carrobre long here"  # Must be 32 bytes for SHA256 HMAC
+
+def get_machine_id():
+    """Generate a unique machine ID based on MAC address, disk serial, and CPU info."""
+    try:
+        # Get MAC address
+        mac = ':'.join(['{:02x}'.format((uuid.getnode() >> i) & 0xff) for i in range(0, 48, 8)])
+        # Get disk serial (Windows-specific)
+        if platform.system() == 'Windows':
+            import win32api
+            disk_serial = str(win32api.GetVolumeInformation("C:\\")[1])
+            # Add CPU info for extra uniqueness
+            cpu_info = str(platform.processor()) if platform.processor() else "default_cpu"
+        else:
+            # Fallback for non-Windows: use filesystem stats and hostname
+            disk_serial = str(os.statvfs('/')[6]) if os.path.exists('/') else str(uuid.getnode())
+            cpu_info = platform.node()  # Hostname as fallback
+        combined = mac + disk_serial + cpu_info
+        return hashlib.sha256(combined.encode()).hexdigest()
+    except Exception as e:
+        print(f"Error generating machine ID: {e}")
+        return None
+
+def generate_license():
+    """Generate a license file with machine ID and HMAC signature."""
+    machine_id = get_machine_id()
+    if not machine_id:
+        messagebox.showerror("License Error")
+        return False
+    
+    license_dir = os.path.join(os.getenv("LOCALAPPDATA"), "Stillmap")
+    license_file = os.path.join(license_dir, "license.dat")
+    
+    try:
+        os.makedirs(license_dir, exist_ok=True)
+        # Generate HMAC signature
+        signature = hmac.new(SECRET_KEY, machine_id.encode(), hashlib.sha256).hexdigest()
+        print(f"Generated machine_id: {machine_id}, signature: {signature}")  # Debug print
+        
+        # Save license data
+        with open(license_file, "w", encoding="utf-8") as f:
+            json.dump({"machine_id": machine_id, "signature": signature}, f, indent=4)
+        return True
+    except PermissionError:
+        messagebox.showerror("Permission Error", f"Cannot write to {license_file}. Please run as administrator or ensure write access to %LOCALAPPDATA%.")
+        return False
+    except Exception as e:
+        messagebox.showerror("License Error", f"Failed to create license file: {str(e)}\nContact support@earthscancompany.com.")
+        return False
+
+def validate_license():
+    """Validate the license file against the current machine."""
+    print("Validating license...")  # Debug print to confirm execution
+    license_dir = os.path.join(os.getenv("LOCALAPPDATA"), "Stillmap")
+    license_file = os.path.join(license_dir, "license.dat")
+    
+    machine_id = get_machine_id()
+    if not machine_id:
+        messagebox.showerror("License Error", "Cannot generate machine ID. Contact support at support@earthscancompany.com.")
+        return False
+    
+    if not os.path.exists(license_file):
+        for attempt in range(2):  # Retry once if generation fails
+            if generate_license():
+                print(f"License generated on attempt {attempt + 1}")
+                return True
+            print(f"License generation failed, attempt {attempt + 1}")
+        messagebox.showerror("License Error", "Failed to generate license after retries. Contact support@earthscancompany.com.")
+        return False
+    
+    try:
+        with open(license_file, "r", encoding="utf-8") as f:
+            license_data = json.load(f)
+        
+        stored_machine_id = license_data["machine_id"]
+        stored_signature = license_data["signature"]
+        print(f"Stored machine_id: {stored_machine_id}, stored signature: {stored_signature}")  # Debug print
+        
+        # Verify HMAC signature
+        computed_signature = hmac.new(SECRET_KEY, stored_machine_id.encode(), hashlib.sha256).hexdigest()
+        if stored_machine_id != machine_id or computed_signature != stored_signature:
+            messagebox.showerror("License Error", "This software is licensed to a different machine.")
+            return False
+        
+        return True
+    except PermissionError:
+        messagebox.showerror("Permission Error", f"Cannot read {license_file}. Please ensure read access to %LOCALAPPDATA%.")
+        return False
+    except Exception as e:
+        messagebox.showerror("License Error", f"Failed to validate license: {str(e)}\nContact support@earthscancompany.com.")
+        return False
 
 pygame.init()
 
@@ -59,10 +154,8 @@ root = Tk()
 root.withdraw()
 current_image_index = 0
 save_directory = os.path.join(os.getenv("LOCALAPPDATA"), "Stillmap", "saved_game_states")
-# Ensure the directory is created with appropriate permissions
 try:
     os.makedirs(save_directory, exist_ok=True)
-    # Verify write access by creating a test file
     test_file = os.path.join(save_directory, ".test_write_access")
     with open(test_file, "w") as f:
         f.write("test")
@@ -74,7 +167,6 @@ except Exception as e:
     messagebox.showerror("Error", f"Failed to set up save directory: {str(e)}")
     sys.exit(1)
 
-# Global variable declarations
 screen_width = 800
 screen_height = 600
 effective_screen_height = 600
@@ -96,7 +188,6 @@ image_display_area = pygame.Rect(0, 0, 0, 0)
 DEFAULT_IMAGE_PATH = 'image_path_logo9.svg'
 default_image_cv2 = None
 
-# Text link states
 hide_text = "Hide"
 map_text = "Map"
 info_text = "Info"
@@ -109,7 +200,6 @@ info_hovered = False
 
 font = pygame.font.SysFont('Arial', 16)
 
-# Info dialog
 info_dialog = None
 close_info_button = None
 
@@ -353,11 +443,10 @@ def organize_photos(input_directory, max_dimension=2400):
                 return
             manager.process_events(event)
     
-    # Set icon and display success message with error handling
     try:
         root = Tk()
         root.withdraw()
-        root.iconbitmap('ico1.ico')  # Updated to use ico1.ico
+        root.iconbitmap('ico1.ico')
         root.after(4000, root.destroy)
         messagebox.showinfo(
             "Success",
@@ -684,18 +773,20 @@ def show_info_dialog():
         text_box_rect = pygame.Rect(10, 10, dialog_width - 20, dialog_height - 80)
         pygame_gui.elements.UITextBox(
             html_text=(
-                "<b>Stillmap Software Version 1.0 Ã¢â‚¬â€� Legal Notice</b><br><br>"
-                "Ã‚Â© 2025 Earth Scan Company. All rights reserved.<br><br>"
+                "<b>Stillmap Software Version 1.0 – Legal Notice</b><br><br>"
+                "© 2025 Earth Scan Company. All rights reserved.<br><br>"
                 "This software is proprietary and developed solely by Earth Scan Company. "
                 "All content, code, and assets are protected by copyright. No part of this "
                 "software may be copied, modified, distributed, or reverse engineered without "
                 "explicit written permission.<br><br>"
+                "Stillmap is licensed to run only on the machine where it was first installed. "
+                "Unauthorized use or transfer to another machine is prohibited.<br><br>"
                 "Stillmap Software Version 1.0 is provided \"as is\" without warranties of any kind. "
                 "Use at your own risk. Earth Scan Company accepts no liability for any damages or "
                 "data loss resulting from the use of this software.<br><br>"
                 "A tutorial on how to use the software is available at:<br>"
                 "<a href='www.youtube.com/earthscancompany'>www.youtube.com/earthscancompany</a><br><br>"
-                "For inquiries, please contact Earth Scan Company."
+                "For inquiries or licensing support, please contact Earth Scan Company at support@earthscancompany.com."
             ),
             relative_rect=text_box_rect,
             manager=manager,
@@ -1035,6 +1126,9 @@ async def update_loop():
     pygame.display.flip()
 
 async def main():
+    if not validate_license():  # Ensure program exits if license fails
+        pygame.quit()
+        sys.exit(1)  # Force exit with error code
     await setup()
     while True:
         await update_loop()
