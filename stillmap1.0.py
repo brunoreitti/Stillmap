@@ -55,6 +55,7 @@ player_pos = [ROWS // 2, COLS // 2]
 player_direction = 0
 current_board = [NUM_BOARDS // 2, NUM_BOARDS // 2]
 edit_mode = False
+map_making_mode = False
 root = Tk()
 root.withdraw()
 current_image_index = 0
@@ -66,7 +67,7 @@ try:
         f.write("test")
     os.remove(test_file)
 except PermissionError:
-    messagebox.showerror("Permission Error", f"Cannot write to {save_directory}. Please run the application as a user with write access to %LOCALAPPDATA% or check security settings.")
+    messagebox.showerror("Permission Error", f"Cannot write to {save_directory}. Please run as administrator.")
     sys.exit(1)
 except Exception as e:
     messagebox.showerror("Error", f"Failed to set up save directory: {str(e)}")
@@ -96,17 +97,29 @@ default_image_cv2 = None
 hide_text = "Hide"
 map_text = "Map"
 info_text = "Info"
+exit_map_making_text = "Exit Map Making"
+exit_map_making_hovered = False
 hide_rect = pygame.Rect(0, 0, 0, 0)
 map_rect = pygame.Rect(0, 0, 0, 0)
 info_rect = pygame.Rect(0, 0, 0, 0)
+exit_map_making_rect = pygame.Rect(0, 0, 0, 0)
 hide_hovered = False
 map_hovered = False
 info_hovered = False
 
 font = pygame.font.SysFont('Arial', 16)
+progress_font = pygame.font.SysFont('Arial', 20)
 
 info_dialog = None
 close_info_button = None
+
+map_making_folders = []
+map_making_index = 0
+map_making_total = 0
+map_making_direction = None
+map_making_arrow_rect = pygame.Rect(0, 0, 20, 20)
+pressed_keys = set()
+preview_next_image = False
 
 def load_image(filepath):
     try:
@@ -166,12 +179,13 @@ def display_image(current_image, display_area, is_pygame_surface=False, scale_mu
 def load_images_from_directory(directory):
     images = []
     filenames = []
-    for filename in os.listdir(directory):
-        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-            filepath = os.path.join(directory, filename)
-            image = pygame.image.load(filepath)
-            images.append(image)
-            filenames.append(filename)
+    files = [f for f in os.listdir(directory) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
+    files.sort(key=lambda x: int(os.path.splitext(x)[0]) if os.path.splitext(x)[0].isdigit() else x)
+    for filename in files:
+        filepath = os.path.join(directory, filename)
+        image = pygame.image.load(filepath)
+        images.append(image)
+        filenames.append(filename)
     return images, filenames
 
 def open_file_explorer():
@@ -478,7 +492,6 @@ def draw_all_boards(mouse_pos, screen_width, screen_height, effective_screen_hei
                 center_x = player_rect.centerx
                 center_y = player_rect.centery
                 arrow_length = scaled_square_size // 2
-                # Set arrow color based on whether the current tile has images
                 arrow_color = GREEN if get_current_tile().images else WHITE
                 if player_direction == 0:
                     pygame.draw.polygon(screen, arrow_color, [(center_x, center_y - arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
@@ -503,7 +516,6 @@ def draw_player(offset_x, offset_y, square_size):
     center_x = player_rect.centerx
     center_y = player_rect.centery
     arrow_length = square_size // 2
-    # Set arrow color based on whether the current tile has images
     arrow_color = GREEN if get_current_tile().images else WHITE
     if player_direction == 0:
         pygame.draw.polygon(screen, arrow_color, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
@@ -627,7 +639,7 @@ def save_game_state():
         with open(filepath, "w") as file:
             json.dump(game_state, file, indent=4)
     except PermissionError:
-        messagebox.showerror("Permission Error", f"Cannot save game to {filepath}. Please ensure you have write access to {save_directory} or run as administrator.")
+        messagebox.showerror("Permission Error", f"Cannot save game to {filepath}. Please ensure you have write access.")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to save game: {str(e)}")
 
@@ -688,13 +700,13 @@ def show_info_dialog():
         text_box_rect = pygame.Rect(10, 10, dialog_width - 20, dialog_height - 80)
         pygame_gui.elements.UITextBox(
             html_text=(
-                "<b>Stillmap Software Version 1.0 — Legal Notice</b><br><br>"
+                "<b>Stillmap Software Version 1.1 — Legal Notice</b><br><br>"
                 "© 2025 Earth Scan Company. All rights reserved.<br><br>"
                 "This software is proprietary and developed solely by Earth Scan Company. "
                 "All content, code, and assets are protected by copyright. No part of this "
                 "software may be copied, modified, distributed, or reverse engineered without "
                 "explicit written permission.<br><br>"
-                "Stillmap Software Version 1.0 is provided \"as is\" without warranties of any kind. "
+                "Stillmap Software Version 1.1 is provided \"as is\" without warranties of any kind. "
                 "Use at your own risk. Earth Scan Company accepts no liability for any damages or "
                 "data loss resulting from the use of this software.<br><br>"
                 "A tutorial on how to use the software is available at:<br>"
@@ -713,6 +725,119 @@ def show_info_dialog():
             container=info_dialog,
             object_id="#close_info_button"
         )
+
+def start_map_making():
+    global map_making_mode, map_making_folders, map_making_index, map_making_total, map_making_direction
+    directory = open_file_explorer()
+    if directory:
+        map_making_folders = [os.path.join(directory, d) for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
+        map_making_folders = [d for d in map_making_folders if any(f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')) for f in os.listdir(d))]
+        map_making_folders.sort(key=lambda x: int(os.path.basename(x)) if os.path.basename(x).isdigit() else x)
+        map_making_total = len(map_making_folders)
+        map_making_index = 0
+        map_making_direction = None
+        if map_making_total > 0:
+            map_making_mode = True
+            get_current_tile().set_directory(map_making_folders[0])
+            restore_pygame_focus()
+
+def exit_map_making():
+    global map_making_mode, map_making_folders, map_making_index, map_making_total, map_making_direction, preview_next_image
+    map_making_mode = False
+    map_making_folders = []
+    map_making_index = 0
+    map_making_total = 0
+    map_making_direction = None
+    preview_next_image = False
+    pressed_keys.clear()
+    current_tile = get_current_tile()
+    if current_tile.images:
+        current_image_index = 0
+
+def set_map_making_direction():
+    global map_making_direction
+    if pressed_keys:
+        if pygame.K_UP in pressed_keys and pygame.K_RIGHT in pressed_keys:
+            map_making_direction = 1
+        elif pygame.K_RIGHT in pressed_keys and pygame.K_DOWN in pressed_keys:
+            map_making_direction = 3
+        elif pygame.K_DOWN in pressed_keys and pygame.K_LEFT in pressed_keys:
+            map_making_direction = 5
+        elif pygame.K_LEFT in pressed_keys and pygame.K_UP in pressed_keys:
+            map_making_direction = 7
+        elif pygame.K_UP in pressed_keys:
+            map_making_direction = 0
+        elif pygame.K_RIGHT in pressed_keys:
+            map_making_direction = 2
+        elif pygame.K_DOWN in pressed_keys:
+            map_making_direction = 4
+        elif pygame.K_LEFT in pressed_keys:
+            map_making_direction = 6
+
+def assign_next_tile():
+    global map_making_index, player_pos, current_board, map_making_direction
+    if map_making_direction is not None and map_making_index + 1 < map_making_total:
+        new_pos = player_pos[:]
+        new_board = current_board[:]
+        if map_making_direction == 0:
+            new_pos[0] -= 1
+        elif map_making_direction == 1:
+            new_pos[0] -= 1
+            new_pos[1] += 1
+        elif map_making_direction == 2:
+            new_pos[1] += 1
+        elif map_making_direction == 3:
+            new_pos[0] += 1
+            new_pos[1] += 1
+        elif map_making_direction == 4:
+            new_pos[0] += 1
+        elif map_making_direction == 5:
+            new_pos[0] += 1
+            new_pos[1] -= 1
+        elif map_making_direction == 6:
+            new_pos[1] -= 1
+        elif map_making_direction == 7:
+            new_pos[0] -= 1
+            new_pos[1] -= 1
+
+        if new_pos[0] < 0:
+            if current_board[0] > 0:
+                new_pos[0] = ROWS - 1
+                new_board[0] -= 1
+            else:
+                new_pos[0] = 0
+        elif new_pos[0] >= ROWS:
+            if current_board[0] < NUM_BOARDS - 1:
+                new_pos[0] = 0
+                new_board[0] += 1
+            else:
+                new_pos[0] = ROWS - 1
+        if new_pos[1] < 0:
+            if current_board[1] > 0:
+                new_pos[1] = COLS - 1
+                new_board[1] -= 1
+            else:
+                new_pos[1] = 0
+        elif new_pos[1] >= COLS:
+            if current_board[1] < NUM_BOARDS - 1:
+                new_pos[1] = 0
+                new_board[1] += 1
+            else:
+                new_pos[1] = COLS - 1
+
+        if new_board != current_board:
+            if get_board(new_board[0] * NUM_BOARDS + new_board[1])[new_pos[0]][new_pos[1]].active:
+                current_board[:] = new_board
+                player_pos[:] = new_pos
+                get_current_tile().set_directory(map_making_folders[map_making_index + 1])
+                map_making_index += 1
+        else:
+            if get_current_board()[new_pos[0]][new_pos[1]].active:
+                player_pos[:] = new_pos
+                get_current_tile().set_directory(map_making_folders[map_making_index + 1])
+                map_making_index += 1
+        map_making_direction = None
+        pressed_keys.clear()
 
 manager = pygame_gui.UIManager((800, 600), theme_path=None)
 manager.get_theme().load_theme({
@@ -752,7 +877,7 @@ bottom_container_buttons = [
     pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Save Game", manager=manager),
     pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Load Game", manager=manager),
     pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Remove Folder", manager=manager),
-    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Orga/derez", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Map Maker", manager=manager),
 ]
 
 sidebar_visible = True
@@ -824,7 +949,7 @@ async def setup():
     manager.set_window_resolution((screen_width, screen_height))
 
 async def update_loop():
-    global screen_width, screen_height, effective_screen_height, current_image_index, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, button_height, separator_height, sidebar_gap, sidebar_rect, map_offset_x, map_offset_y, BOARD_SIZE, SQUARE_SIZE, separator_y, bottom_container_y_start, image_display_area, hide_hovered, map_hovered, info_hovered, info_dialog, close_info_button
+    global screen_width, screen_height, effective_screen_height, current_image_index, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, button_height, separator_height, sidebar_gap, sidebar_rect, map_offset_x, map_offset_y, BOARD_SIZE, SQUARE_SIZE, separator_y, bottom_container_y_start, image_display_area, hide_hovered, map_hovered, info_hovered, exit_map_making_hovered, info_dialog, close_info_button, map_making_arrow_rect, preview_next_image
     if 'current_image_index' not in globals():
         current_image_index = 0
 
@@ -892,30 +1017,78 @@ async def update_loop():
 
         current_tile = get_current_tile()
         display_image(default_image_cv2, inner_display_area, is_pygame_surface=False, scale_multiplier=1.25)
-        if current_tile.images and 0 <= current_image_index < len(current_tile.images):
+        if map_making_mode:
+            if map_making_index < map_making_total:
+                if preview_next_image and map_making_index + 1 < map_making_total:
+                    # Load and display the first image from the next folder
+                    next_folder = map_making_folders[map_making_index + 1]
+                    next_images, _ = load_images_from_directory(next_folder)
+                    if next_images:
+                        display_image(next_images[0], inner_display_area, is_pygame_surface=True)
+                elif current_tile.images:
+                    # Display the first image from the current folder
+                    current_image = current_tile.images[0]
+                    display_image(current_image, inner_display_area, is_pygame_surface=True)
+        elif current_tile.images and 0 <= current_image_index < len(current_tile.images):
             current_image = current_tile.images[current_image_index]
             display_image(current_image, inner_display_area, is_pygame_surface=True)
 
     update_button_positions()
 
-    hide_hovered = hide_rect.collidepoint(mouse_pos)
-    map_hovered = map_rect.collidepoint(mouse_pos)
-    info_hovered = info_rect.collidepoint(mouse_pos)
+    if map_making_mode:
+        exit_map_making_rect = progress_font.render(exit_map_making_text, True, WHITE).get_rect(topleft=(image_display_area.left + sidebar_padding, image_display_area.top + sidebar_padding))
+        exit_map_making_hovered = exit_map_making_rect.collidepoint(mouse_pos)
+        exit_map_making_surface = progress_font.render(exit_map_making_text, True, LINK_HOVER_COLOR if exit_map_making_hovered else WHITE)
+        screen.blit(exit_map_making_surface, exit_map_making_rect.topleft)
+        if exit_map_making_hovered:
+            pygame.draw.line(screen, LINK_HOVER_COLOR, (exit_map_making_rect.left, exit_map_making_rect.bottom - 2), (exit_map_making_rect.right, exit_map_making_rect.bottom - 2), 1)
 
-    hide_surface = font.render(hide_text, True, LINK_HOVER_COLOR if hide_hovered else WHITE)
-    screen.blit(hide_surface, hide_rect.topleft)
-    if hide_hovered:
-        pygame.draw.line(screen, LINK_HOVER_COLOR, (hide_rect.left, hide_rect.bottom - 2), (hide_rect.right, hide_rect.bottom - 2), 1)
+        progress_text = f"{map_making_index + 1}/{map_making_total} images done"
+        progress_rect = progress_font.render(progress_text, True, WHITE).get_rect(topleft=(image_display_area.left + sidebar_padding, image_display_area.top + sidebar_padding + 30))
+        screen.blit(progress_font.render(progress_text, True, WHITE), progress_rect.topleft)
 
-    map_surface = font.render(map_text, True, LINK_HOVER_COLOR if map_hovered else WHITE)
-    screen.blit(map_surface, map_rect.topleft)
-    if map_hovered:
-        pygame.draw.line(screen, LINK_HOVER_COLOR, (map_rect.left, map_rect.bottom - 2), (map_rect.right, map_rect.bottom - 2), 1)
+        map_making_arrow_rect = pygame.Rect(image_display_area.right - 30, image_display_area.bottom - 30, 20, 20)
+        if map_making_direction is None:
+            pygame.draw.circle(screen, GREEN, map_making_arrow_rect.center, 10)
+        else:
+            center_x, center_y = map_making_arrow_rect.center
+            arrow_length = 10
+            if map_making_direction == 0:
+                pygame.draw.polygon(screen, GREEN, [(center_x, center_y - arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+            elif map_making_direction == 1:
+                pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 5), (center_x + 5, center_y)])
+            elif map_making_direction == 2:
+                pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+            elif map_making_direction == 3:
+                pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 5), (center_x + 5, center_y)])
+            elif map_making_direction == 4:
+                pygame.draw.polygon(screen, GREEN, [(center_x, center_y + arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+            elif map_making_direction == 5:
+                pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y + arrow_length), (center_x - 5, center_y), (center_x, center_y + 5)])
+            elif map_making_direction == 6:
+                pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+            elif map_making_direction == 7:
+                pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y - arrow_length), (center_x - 5, center_y), (center_x, center_y - 5)])
 
-    info_surface = font.render(info_text, True, LINK_HOVER_COLOR if info_hovered else WHITE)
-    screen.blit(info_surface, info_rect.topleft)
-    if info_hovered:
-        pygame.draw.line(screen, LINK_HOVER_COLOR, (info_rect.left, info_rect.bottom - 2), (info_rect.right, info_rect.bottom - 2), 1)
+    else:
+        hide_hovered = hide_rect.collidepoint(mouse_pos)
+        map_hovered = map_rect.collidepoint(mouse_pos)
+        info_hovered = info_rect.collidepoint(mouse_pos)
+
+        hide_surface = font.render(hide_text, True, LINK_HOVER_COLOR if hide_hovered else WHITE)
+        screen.blit(hide_surface, hide_rect.topleft)
+        if hide_hovered:
+            pygame.draw.line(screen, LINK_HOVER_COLOR, (hide_rect.left, hide_rect.bottom - 2), (hide_rect.right, hide_rect.bottom - 2), 1)
+
+        map_surface = font.render(map_text, True, LINK_HOVER_COLOR if map_hovered else WHITE)
+        screen.blit(map_surface, map_rect.topleft)
+        if map_hovered:
+            pygame.draw.line(screen, LINK_HOVER_COLOR, (map_rect.left, map_rect.bottom - 2), (map_rect.right, map_rect.bottom - 2), 1)
+
+        info_surface = font.render(info_text, True, LINK_HOVER_COLOR if info_hovered else WHITE)
+        screen.blit(info_surface, info_rect.topleft)
+        if info_hovered:
+            pygame.draw.line(screen, LINK_HOVER_COLOR, (info_rect.left, info_rect.bottom - 2), (info_rect.right, info_rect.bottom - 2), 1)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -931,102 +1104,95 @@ async def update_loop():
                 dialog_y = (screen_height - dialog_height) // 2
                 info_dialog.set_position((dialog_x, dialog_y))
         elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_e:
-                toggle_edit_mode()
-            elif event.key == pygame.K_UP:
-                move_player(forward=True)
-            elif event.key == pygame.K_DOWN:
-                move_player(forward=False)
-            elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
-                rotate_player(event.key)
+            if map_making_mode:
+                if event.key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT):
+                    pressed_keys.add(event.key)
+                    set_map_making_direction()
+                elif event.key == pygame.K_RETURN and map_making_direction is not None:
+                    assign_next_tile()
+                elif event.key in (pygame.K_LSHIFT, pygame.K_RSHIFT):
+                    preview_next_image = True
+            else:
+                if event.key == pygame.K_e:
+                    toggle_edit_mode()
+                elif event.key == pygame.K_UP:
+                    move_player(forward=True)
+                elif event.key == pygame.K_DOWN:
+                    move_player(forward=False)
+                elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
+                    rotate_player(event.key)
+        elif event.type == pygame.KEYUP:
+            if map_making_mode:
+                if event.key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT):
+                    pressed_keys.discard(event.key)
+                    set_map_making_direction()
+                elif event.key in (pygame.K_LSHIFT, pygame.K_RSHIFT):
+                    preview_next_image = False
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:
-                if hide_rect.collidepoint(event.pos) and not maximized:
-                    toggle_sidebar()
-                elif map_rect.collidepoint(event.pos):
-                    toggle_maximize()
-                elif info_rect.collidepoint(event.pos) and sidebar_visible and not maximized:
-                    show_info_dialog()
-                elif edit_mode and (sidebar_visible or maximized):
-                    if maximized:
-                        full_map_size = BOARD_SIZE * NUM_BOARDS
-                        scale_factor = min(screen_width / full_map_size, effective_screen_height / full_map_size)
-                        scaled_size = int(BOARD_SIZE * scale_factor)
-                        scaled_square_size = scaled_size // COLS
-                        offset_x = (screen_width - (scaled_size * NUM_BOARDS)) // 2
-                        offset_y = (effective_screen_height - (scaled_size * NUM_BOARDS)) // 2
-                        for board_row in range(NUM_BOARDS):
-                            for board_col in range(NUM_BOARDS):
-                                board = boards[board_row][board_col]
-                                board_offset_x = offset_x + (board_col * scaled_size)
-                                board_offset_y = offset_y + (board_row * scaled_size)
-                                for row in board:
-                                    for tile in row:
-                                        adjusted_rect = pygame.Rect(
-                                            board_offset_x + (tile.col * scaled_square_size),
-                                            board_offset_y + (tile.row * scaled_square_size),
-                                            scaled_square_size,
-                                            scaled_square_size
-                                        )
-                                        if adjusted_rect.collidepoint(event.pos):
-                                            tile.toggle_active()
-                                            break
-                    elif sidebar_visible:
-                        for row in get_current_board():
-                            for tile in row:
-                                adjusted_rect = tile.rect.move(map_offset_x, map_offset_y)
-                                if adjusted_rect.collidepoint(event.pos):
-                                    tile.toggle_active()
-                                    break
+                if map_making_mode and exit_map_making_rect.collidepoint(event.pos):
+                    exit_map_making()
+                elif not map_making_mode:
+                    if hide_rect.collidepoint(event.pos) and not maximized:
+                        toggle_sidebar()
+                    elif map_rect.collidepoint(event.pos):
+                        toggle_maximize()
+                    elif info_rect.collidepoint(event.pos) and sidebar_visible and not maximized:
+                        show_info_dialog()
+                    elif edit_mode and (sidebar_visible or maximized):
+                        if maximized:
+                            full_map_size = BOARD_SIZE * NUM_BOARDS
+                            scale_factor = min(screen_width / full_map_size, effective_screen_height / full_map_size)
+                            scaled_size = int(BOARD_SIZE * scale_factor)
+                            scaled_square_size = scaled_size // COLS
+                            offset_x = (screen_width - (scaled_size * NUM_BOARDS)) // 2
+                            offset_y = (effective_screen_height - (scaled_size * NUM_BOARDS)) // 2
+                            for board_row in range(NUM_BOARDS):
+                                for board_col in range(NUM_BOARDS):
+                                    board = boards[board_row][board_col]
+                                    board_offset_x = offset_x + (board_col * scaled_size)
+                                    board_offset_y = offset_y + (board_row * scaled_size)
+                                    for row in board:
+                                        for tile in row:
+                                            adjusted_rect = pygame.Rect(
+                                                board_offset_x + (tile.col * scaled_square_size),
+                                                board_offset_y + (tile.row * scaled_square_size),
+                                                scaled_square_size,
+                                                scaled_square_size
+                                            )
+                                            if adjusted_rect.collidepoint(event.pos):
+                                                tile.toggle_active()
+                                                break
+                        elif sidebar_visible:
+                            for row in get_current_board():
+                                for tile in row:
+                                    adjusted_rect = tile.rect.move(map_offset_x, map_offset_y)
+                                    if adjusted_rect.collidepoint(event.pos):
+                                        tile.toggle_active()
+                                        break
         elif event.type == pygame_gui.UI_BUTTON_PRESSED:
-            if event.ui_element == top_container_buttons[0] and sidebar_visible and not maximized:
-                toggle_edit_mode()
-            elif event.ui_element == bottom_container_buttons[0] and sidebar_visible and not maximized:
-                directory = open_file_explorer()
-                if directory:
-                    get_current_tile().set_directory(directory)
-                    current_image_index = 0
-                    restore_pygame_focus()
-            elif event.ui_element == bottom_container_buttons[1] and sidebar_visible and not maximized:
-                save_game_state()
-            elif event.ui_element == bottom_container_buttons[2] and sidebar_visible and not maximized:
-                load_game_state()
-            elif event.ui_element == bottom_container_buttons[3] and sidebar_visible and not maximized:
-                remove_current_tile_folder()
-            elif event.ui_element == bottom_container_buttons[4] and sidebar_visible and not maximized:
-                directory = open_file_explorer()
-                if directory:
-                    organize_photos(directory)
-                    screen.fill(MAIN_BG_COLOR)
-                    if not maximized and sidebar_visible:
-                        pygame.draw.rect(screen, SIDEBAR_BG_COLOR, sidebar_rect)
-                        draw_board(mouse_pos, map_offset_x, map_offset_y)
-                        draw_player(map_offset_x, map_offset_y, SQUARE_SIZE)
-                        pygame.draw.line(screen, SEPARATOR_COLOR,
-                                         (sidebar_rect.left + sidebar_padding, separator_y),
-                                         (sidebar_rect.right - sidebar_padding, separator_y),
-                                         separator_height)
-                    image_display_area = pygame.Rect(
-                        sidebar_padding,
-                        sidebar_padding,
-                        screen_width - (SIDEBAR_WIDTH + sidebar_padding + sidebar_gap if sidebar_visible else sidebar_padding * 2),
-                        effective_screen_height - (sidebar_padding * 2)
-                    )
-                    pygame.draw.rect(screen, IMAGE_BG_COLOR, image_display_area)
-                    pygame.draw.rect(screen, SIDEBAR_BORDER_COLOR, image_display_area, 1)
-                    inner_display_area = image_display_area.inflate(-2, -2)
-                    display_image(default_image_cv2, inner_display_area, is_pygame_surface=False, scale_multiplier=1.25)
-                    if current_tile.images and 0 <= current_image_index < len(current_tile.images):
-                        current_image = current_tile.images[current_image_index]
-                        display_image(current_image, inner_display_area, is_pygame_surface=True)
-                    manager.update(1.0 / FPS)
-                    manager.draw_ui(screen)
-                    pygame.display.flip()
-            elif event.ui_element == close_info_button:
-                if info_dialog:
-                    info_dialog.kill()
-                    info_dialog = None
-                    close_info_button = None
+            if not map_making_mode:
+                if event.ui_element == top_container_buttons[0] and sidebar_visible and not maximized:
+                    toggle_edit_mode()
+                elif event.ui_element == bottom_container_buttons[0] and sidebar_visible and not maximized:
+                    directory = open_file_explorer()
+                    if directory:
+                        get_current_tile().set_directory(directory)
+                        current_image_index = 0
+                        restore_pygame_focus()
+                elif event.ui_element == bottom_container_buttons[1] and sidebar_visible and not maximized:
+                    save_game_state()
+                elif event.ui_element == bottom_container_buttons[2] and sidebar_visible and not maximized:
+                    load_game_state()
+                elif event.ui_element == bottom_container_buttons[3] and sidebar_visible and not maximized:
+                    remove_current_tile_folder()
+                elif event.ui_element == bottom_container_buttons[4] and sidebar_visible and not maximized:
+                    start_map_making()
+                elif event.ui_element == close_info_button:
+                    if info_dialog:
+                        info_dialog.kill()
+                        info_dialog = None
+                        close_info_button = None
         manager.process_events(event)
 
     manager.update(1.0 / FPS)
