@@ -5,110 +5,14 @@ import os
 import json
 import platform
 import asyncio
-import uuid
-import hashlib
-import hmac
-import datetime
 from PIL import Image, ExifTags, ImageOps
 from tkinter import Tk, filedialog, simpledialog, messagebox
 import cv2
 import numpy as np
 import cairosvg
+from datetime import datetime
 import ctypes
 from tkinter import TclError
-
-# Embedded secret key (to be obfuscated with PyArmor)
-SECRET_KEY = b"secret key 32 carrobre long here"  # Must be 32 bytes for SHA256 HMAC
-
-def get_machine_id():
-    """Generate a unique machine ID based on MAC address, disk serial, and CPU info."""
-    try:
-        # Get MAC address
-        mac = ':'.join(['{:02x}'.format((uuid.getnode() >> i) & 0xff) for i in range(0, 48, 8)])
-        # Get disk serial (Windows-specific)
-        if platform.system() == 'Windows':
-            import win32api
-            disk_serial = str(win32api.GetVolumeInformation("C:\\")[1])
-            # Add CPU info for extra uniqueness
-            cpu_info = str(platform.processor()) if platform.processor() else "default_cpu"
-        else:
-            # Fallback for non-Windows: use filesystem stats and hostname
-            disk_serial = str(os.statvfs('/')[6]) if os.path.exists('/') else str(uuid.getnode())
-            cpu_info = platform.node()  # Hostname as fallback
-        combined = mac + disk_serial + cpu_info
-        return hashlib.sha256(combined.encode()).hexdigest()
-    except Exception as e:
-        print(f"Error generating machine ID: {e}")
-        return None
-
-def generate_license():
-    """Generate a license file with machine ID and HMAC signature."""
-    machine_id = get_machine_id()
-    if not machine_id:
-        messagebox.showerror("License Error")
-        return False
-    
-    license_dir = os.path.join(os.getenv("LOCALAPPDATA"), "Stillmap")
-    license_file = os.path.join(license_dir, "license.dat")
-    
-    try:
-        os.makedirs(license_dir, exist_ok=True)
-        # Generate HMAC signature
-        signature = hmac.new(SECRET_KEY, machine_id.encode(), hashlib.sha256).hexdigest()
-        print(f"Generated machine_id: {machine_id}, signature: {signature}")  # Debug print
-        
-        # Save license data
-        with open(license_file, "w", encoding="utf-8") as f:
-            json.dump({"machine_id": machine_id, "signature": signature}, f, indent=4)
-        return True
-    except PermissionError:
-        messagebox.showerror("Permission Error", f"Cannot write to {license_file}. Please run as administrator or ensure write access to %LOCALAPPDATA%.")
-        return False
-    except Exception as e:
-        messagebox.showerror("License Error", f"Failed to create license file: {str(e)}\nContact support@earthscancompany.com.")
-        return False
-
-def validate_license():
-    """Validate the license file against the current machine."""
-    print("Validating license...")  # Debug print to confirm execution
-    license_dir = os.path.join(os.getenv("LOCALAPPDATA"), "Stillmap")
-    license_file = os.path.join(license_dir, "license.dat")
-    
-    machine_id = get_machine_id()
-    if not machine_id:
-        messagebox.showerror("License Error", "Cannot generate machine ID. Contact support at support@earthscancompany.com.")
-        return False
-    
-    if not os.path.exists(license_file):
-        for attempt in range(2):  # Retry once if generation fails
-            if generate_license():
-                print(f"License generated on attempt {attempt + 1}")
-                return True
-            print(f"License generation failed, attempt {attempt + 1}")
-        messagebox.showerror("License Error", "Failed to generate license after retries. Contact support@earthscancompany.com.")
-        return False
-    
-    try:
-        with open(license_file, "r", encoding="utf-8") as f:
-            license_data = json.load(f)
-        
-        stored_machine_id = license_data["machine_id"]
-        stored_signature = license_data["signature"]
-        print(f"Stored machine_id: {stored_machine_id}, stored signature: {stored_signature}")  # Debug print
-        
-        # Verify HMAC signature
-        computed_signature = hmac.new(SECRET_KEY, stored_machine_id.encode(), hashlib.sha256).hexdigest()
-        if stored_machine_id != machine_id or computed_signature != stored_signature:
-            messagebox.showerror("License Error", "This software is licensed to a different machine.")
-            return False
-        
-        return True
-    except PermissionError:
-        messagebox.showerror("Permission Error", f"Cannot read {license_file}. Please ensure read access to %LOCALAPPDATA%.")
-        return False
-    except Exception as e:
-        messagebox.showerror("License Error", f"Failed to validate license: {str(e)}\nContact support@earthscancompany.com.")
-        return False
 
 pygame.init()
 
@@ -145,6 +49,7 @@ SIDEBAR_BORDER_COLOR = (120, 120, 120)
 GRID_COLOR = (100, 100, 200)
 CARD_BG_COLOR = (255, 255, 255)
 LINK_HOVER_COLOR = (180, 180, 180)
+GREEN = (0, 255, 0)
 
 player_pos = [ROWS // 2, COLS // 2]
 player_direction = 0
@@ -214,8 +119,7 @@ def load_image(filepath):
             if image is None:
                 raise ValueError("Image not found or unable to load")
             return image
-    except Exception as e:
-        print(f"Failed to load image {filepath}: {e}")
+    except Exception:
         return None
 
 def cv2_to_pygame(image):
@@ -232,13 +136,10 @@ def load_svg_image(svg_path, output_width=None, output_height=None):
         nparr = np.frombuffer(png_data, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
         return image
-    except Exception as e:
-        print(f"Failed to load SVG {svg_path}: {e}")
+    except Exception:
         return None
 
 default_image_cv2 = load_image(DEFAULT_IMAGE_PATH)
-if default_image_cv2 is None:
-    print(f"Failed to load default image from {DEFAULT_IMAGE_PATH}")
 
 def display_image(current_image, display_area, is_pygame_surface=False, scale_multiplier=1.0):
     if current_image is not None:
@@ -286,8 +187,8 @@ def get_image_date(image_path):
                     decoded = ExifTags.TAGS.get(tag, tag)
                     if decoded == "DateTimeOriginal":
                         return datetime.strptime(value, '%Y:%m:%d %H:%M:%S')
-    except Exception as e:
-        print(f"Error reading EXIF data: {e}")
+    except Exception:
+        return None
     return None
 
 def resize_image(input_path, output_path, max_dimension=2400):
@@ -493,6 +394,11 @@ class Tile:
             self.color = LIGHTER_BLUE if self.active else BLACK
         pygame.draw.rect(screen, self.color, adjusted_rect)
         pygame.draw.rect(screen, GRID_COLOR, adjusted_rect, 1)
+        if self.directory and self.images:
+            inner_size = self.size // 3
+            inner_rect = adjusted_rect.inflate(-inner_size, -inner_size)
+            inner_rect.center = adjusted_rect.center
+            pygame.draw.rect(screen, GREEN, inner_rect, 1)
 
     def toggle_active(self):
         self.active = not self.active
@@ -556,6 +462,11 @@ def draw_all_boards(mouse_pos, screen_width, screen_height, effective_screen_hei
                         tile.color = LIGHTER_BLUE if tile.active else BLACK
                     pygame.draw.rect(screen, tile.color, adjusted_rect)
                     pygame.draw.rect(screen, GRID_COLOR, adjusted_rect, 1)
+                    if tile.directory and tile.images:
+                        inner_size = scaled_square_size // 3
+                        inner_rect = adjusted_rect.inflate(-inner_size, -inner_size)
+                        inner_rect.center = adjusted_rect.center
+                        pygame.draw.rect(screen, GREEN, inner_rect, 1)
             if board_row == current_board[0] and board_col == current_board[1]:
                 player_rect = pygame.Rect(
                     board_offset_x + (player_pos[1] * scaled_square_size),
@@ -567,22 +478,24 @@ def draw_all_boards(mouse_pos, screen_width, screen_height, effective_screen_hei
                 center_x = player_rect.centerx
                 center_y = player_rect.centery
                 arrow_length = scaled_square_size // 2
+                # Set arrow color based on whether the current tile has images
+                arrow_color = GREEN if get_current_tile().images else WHITE
                 if player_direction == 0:
-                    pygame.draw.polygon(screen, WHITE, [(center_x, center_y - arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+                    pygame.draw.polygon(screen, arrow_color, [(center_x, center_y - arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
                 elif player_direction == 1:
-                    pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 5), (center_x + 5, center_y)])
+                    pygame.draw.polygon(screen, arrow_color, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 5), (center_x + 5, center_y)])
                 elif player_direction == 2:
-                    pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+                    pygame.draw.polygon(screen, arrow_color, [(center_x + arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
                 elif player_direction == 3:
-                    pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 5), (center_x + 5, center_y)])
+                    pygame.draw.polygon(screen, arrow_color, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 5), (center_x + 5, center_y)])
                 elif player_direction == 4:
-                    pygame.draw.polygon(screen, WHITE, [(center_x, center_y + arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+                    pygame.draw.polygon(screen, arrow_color, [(center_x, center_y + arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
                 elif player_direction == 5:
-                    pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y + arrow_length), (center_x - 5, center_y), (center_x, center_y + 5)])
+                    pygame.draw.polygon(screen, arrow_color, [(center_x - arrow_length, center_y + arrow_length), (center_x - 5, center_y), (center_x, center_y + 5)])
                 elif player_direction == 6:
-                    pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+                    pygame.draw.polygon(screen, arrow_color, [(center_x - arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
                 elif player_direction == 7:
-                    pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y - arrow_length), (center_x - 5, center_y), (center_x, center_y - 5)])
+                    pygame.draw.polygon(screen, arrow_color, [(center_x - arrow_length, center_y - arrow_length), (center_x - 5, center_y), (center_x, center_y - 5)])
 
 def draw_player(offset_x, offset_y, square_size):
     player_rect = pygame.Rect(player_pos[1] * square_size, player_pos[0] * square_size, square_size, square_size).move(offset_x, offset_y)
@@ -590,22 +503,24 @@ def draw_player(offset_x, offset_y, square_size):
     center_x = player_rect.centerx
     center_y = player_rect.centery
     arrow_length = square_size // 2
+    # Set arrow color based on whether the current tile has images
+    arrow_color = GREEN if get_current_tile().images else WHITE
     if player_direction == 0:
-        pygame.draw.polygon(screen, WHITE, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, arrow_color, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
     elif player_direction == 1:
-        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, arrow_color, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
     elif player_direction == 2:
-        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+        pygame.draw.polygon(screen, arrow_color, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
     elif player_direction == 3:
-        pygame.draw.polygon(screen, WHITE, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, arrow_color, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
     elif player_direction == 4:
-        pygame.draw.polygon(screen, WHITE, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+        pygame.draw.polygon(screen, arrow_color, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
     elif player_direction == 5:
-        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
+        pygame.draw.polygon(screen, arrow_color, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
     elif player_direction == 6:
-        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+        pygame.draw.polygon(screen, arrow_color, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
     elif player_direction == 7:
-        pygame.draw.polygon(screen, WHITE, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
+        pygame.draw.polygon(screen, arrow_color, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
 
 def move_player(forward=True):
     global current_board
@@ -773,20 +688,18 @@ def show_info_dialog():
         text_box_rect = pygame.Rect(10, 10, dialog_width - 20, dialog_height - 80)
         pygame_gui.elements.UITextBox(
             html_text=(
-                "<b>Stillmap Software Version 1.0 – Legal Notice</b><br><br>"
+                "<b>Stillmap Software Version 1.0 — Legal Notice</b><br><br>"
                 "© 2025 Earth Scan Company. All rights reserved.<br><br>"
                 "This software is proprietary and developed solely by Earth Scan Company. "
                 "All content, code, and assets are protected by copyright. No part of this "
                 "software may be copied, modified, distributed, or reverse engineered without "
                 "explicit written permission.<br><br>"
-                "Stillmap is licensed to run only on the machine where it was first installed. "
-                "Unauthorized use or transfer to another machine is prohibited.<br><br>"
                 "Stillmap Software Version 1.0 is provided \"as is\" without warranties of any kind. "
                 "Use at your own risk. Earth Scan Company accepts no liability for any damages or "
                 "data loss resulting from the use of this software.<br><br>"
                 "A tutorial on how to use the software is available at:<br>"
                 "<a href='www.youtube.com/earthscancompany'>www.youtube.com/earthscancompany</a><br><br>"
-                "For inquiries or licensing support, please contact Earth Scan Company at support@earthscancompany.com."
+                "For inquiries, please contact Earth Scan Company."
             ),
             relative_rect=text_box_rect,
             manager=manager,
@@ -851,7 +764,6 @@ def toggle_sidebar():
     hide_text = "Show" if not sidebar_visible else "Hide"
     if not maximized:
         update_button_positions()
-    print(f"toggle_sidebar: sidebar_visible={sidebar_visible}, maximized={maximized}")
 
 def toggle_maximize():
     global maximized, sidebar_visible, map_text
@@ -871,7 +783,6 @@ def toggle_maximize():
             button.show()
         map_text = "Map"
         update_button_positions()
-    print(f"toggle_maximize: sidebar_visible={sidebar_visible}, maximized={maximized}")
 
 def update_button_positions():
     global screen_width, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, button_height, map_offset_y, BOARD_SIZE, sidebar_rect, image_display_area, hide_rect, map_rect, info_rect
@@ -885,7 +796,6 @@ def update_button_positions():
         hide_rect = font.render(hide_text, True, WHITE).get_rect(topleft=(sidebar_rect.left + sidebar_padding, sidebar_rect.top + sidebar_padding))
         map_rect = font.render(map_text, True, WHITE).get_rect(topleft=(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - font.size(map_text)[0], sidebar_rect.top + sidebar_padding))
         info_rect = font.render(info_text, True, WHITE).get_rect(bottomright=(sidebar_rect.right - sidebar_padding, sidebar_rect.bottom - sidebar_padding))
-        print(f"Hide link at {hide_rect.topleft}, Map link at {map_rect.topleft}, Info link at {info_rect.bottomright}")
     elif not maximized:
         top_container_buttons[0].hide()
         button_x = image_display_area.right - font.size(hide_text)[0] - 5
@@ -893,13 +803,11 @@ def update_button_positions():
         hide_rect = font.render(hide_text, True, WHITE).get_rect(topleft=(button_x, button_y))
         map_rect = pygame.Rect(-1000, -1000, 0, 0)
         info_rect = pygame.Rect(-1000, -1000, 0, 0)
-        print(f"Hide link at {hide_rect.topleft}, Map and Info links hidden")
     else:
         top_container_buttons[0].hide()
         hide_rect = pygame.Rect(-1000, -1000, 0, 0)
         map_rect = font.render(map_text, True, WHITE).get_rect(topleft=(screen_width - font.size(map_text)[0] - 10, 10))
         info_rect = pygame.Rect(-1000, -1000, 0, 0)
-        print(f"Map link at {map_rect.topleft}, Hide and Info links hidden")
     for i, button in enumerate(bottom_container_buttons):
         button_y = bottom_container_y_start + (i * (button_height + sidebar_spacing))
         button.set_position(pygame.math.Vector2(button_x_center, button_y) if sidebar_visible and not maximized else pygame.math.Vector2(-1000, -1000))
@@ -1126,9 +1034,6 @@ async def update_loop():
     pygame.display.flip()
 
 async def main():
-    if not validate_license():  # Ensure program exits if license fails
-        pygame.quit()
-        sys.exit(1)  # Force exit with error code
     await setup()
     while True:
         await update_loop()
