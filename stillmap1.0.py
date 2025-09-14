@@ -56,6 +56,7 @@ player_direction = 0
 current_board = [NUM_BOARDS // 2, NUM_BOARDS // 2]
 edit_mode = False
 map_making_mode = False
+free_move_mode = False  # Initialize free_move_mode globally
 root = Tk()
 root.withdraw()
 current_image_index = 0
@@ -98,11 +99,14 @@ hide_text = "Hide"
 map_text = "Map"
 info_text = "Info"
 exit_map_making_text = "Exit Map Making"
+lift_text = "Lift Off"  # Text for the lift off/resume button
 exit_map_making_hovered = False
+lift_hovered = False
 hide_rect = pygame.Rect(0, 0, 0, 0)
 map_rect = pygame.Rect(0, 0, 0, 0)
 info_rect = pygame.Rect(0, 0, 0, 0)
 exit_map_making_rect = pygame.Rect(0, 0, 0, 0)
+lift_rect = pygame.Rect(0, 0, 0, 0)
 hide_hovered = False
 map_hovered = False
 info_hovered = False
@@ -727,7 +731,7 @@ def show_info_dialog():
         )
 
 def start_map_making():
-    global map_making_mode, map_making_folders, map_making_index, map_making_total, map_making_direction
+    global map_making_mode, map_making_folders, map_making_index, map_making_total, map_making_direction, free_move_mode
     directory = open_file_explorer()
     if directory:
         map_making_folders = [os.path.join(directory, d) for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
@@ -736,23 +740,33 @@ def start_map_making():
         map_making_total = len(map_making_folders)
         map_making_index = 0
         map_making_direction = None
+        free_move_mode = False
         if map_making_total > 0:
             map_making_mode = True
             get_current_tile().set_directory(map_making_folders[0])
             restore_pygame_focus()
 
 def exit_map_making():
-    global map_making_mode, map_making_folders, map_making_index, map_making_total, map_making_direction, preview_next_image
+    global map_making_mode, map_making_folders, map_making_index, map_making_total, map_making_direction, preview_next_image, free_move_mode
     map_making_mode = False
     map_making_folders = []
     map_making_index = 0
     map_making_total = 0
     map_making_direction = None
     preview_next_image = False
+    free_move_mode = False
     pressed_keys.clear()
     current_tile = get_current_tile()
     if current_tile.images:
         current_image_index = 0
+
+def toggle_free_move_mode():
+    global free_move_mode, lift_text, map_making_direction, pressed_keys
+    free_move_mode = not free_move_mode
+    lift_text = "Resume" if free_move_mode else "Lift Off"
+    if not free_move_mode:
+        map_making_direction = None
+        pressed_keys.clear()
 
 def set_map_making_direction():
     global map_making_direction
@@ -949,7 +963,7 @@ async def setup():
     manager.set_window_resolution((screen_width, screen_height))
 
 async def update_loop():
-    global screen_width, screen_height, effective_screen_height, current_image_index, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, button_height, separator_height, sidebar_gap, sidebar_rect, map_offset_x, map_offset_y, BOARD_SIZE, SQUARE_SIZE, separator_y, bottom_container_y_start, image_display_area, hide_hovered, map_hovered, info_hovered, exit_map_making_hovered, info_dialog, close_info_button, map_making_arrow_rect, preview_next_image
+    global screen_width, screen_height, effective_screen_height, current_image_index, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, button_height, separator_height, sidebar_gap, sidebar_rect, map_offset_x, map_offset_y, BOARD_SIZE, SQUARE_SIZE, separator_y, bottom_container_y_start, image_display_area, hide_hovered, map_hovered, info_hovered, exit_map_making_hovered, lift_hovered, lift_text, info_dialog, close_info_button, map_making_arrow_rect, preview_next_image
     if 'current_image_index' not in globals():
         current_image_index = 0
 
@@ -1017,18 +1031,15 @@ async def update_loop():
 
         current_tile = get_current_tile()
         display_image(default_image_cv2, inner_display_area, is_pygame_surface=False, scale_multiplier=1.25)
-        if map_making_mode:
-            if map_making_index < map_making_total:
-                if preview_next_image and map_making_index + 1 < map_making_total:
-                    # Load and display the first image from the next folder
-                    next_folder = map_making_folders[map_making_index + 1]
-                    next_images, _ = load_images_from_directory(next_folder)
-                    if next_images:
-                        display_image(next_images[0], inner_display_area, is_pygame_surface=True)
-                elif current_tile.images:
-                    # Display the first image from the current folder
-                    current_image = current_tile.images[0]
-                    display_image(current_image, inner_display_area, is_pygame_surface=True)
+        if map_making_mode and not free_move_mode:
+            if preview_next_image and map_making_index + 1 < map_making_total:
+                next_folder = map_making_folders[map_making_index + 1]
+                next_images, _ = load_images_from_directory(next_folder)
+                if next_images:
+                    display_image(next_images[0], inner_display_area, is_pygame_surface=True)
+            elif current_tile.images:
+                current_image = current_tile.images[0]
+                display_image(current_image, inner_display_area, is_pygame_surface=True)
         elif current_tile.images and 0 <= current_image_index < len(current_tile.images):
             current_image = current_tile.images[current_image_index]
             display_image(current_image, inner_display_area, is_pygame_surface=True)
@@ -1047,28 +1058,36 @@ async def update_loop():
         progress_rect = progress_font.render(progress_text, True, WHITE).get_rect(topleft=(image_display_area.left + sidebar_padding, image_display_area.top + sidebar_padding + 30))
         screen.blit(progress_font.render(progress_text, True, WHITE), progress_rect.topleft)
 
-        map_making_arrow_rect = pygame.Rect(image_display_area.right - 30, image_display_area.bottom - 30, 20, 20)
-        if map_making_direction is None:
-            pygame.draw.circle(screen, GREEN, map_making_arrow_rect.center, 10)
-        else:
-            center_x, center_y = map_making_arrow_rect.center
-            arrow_length = 10
-            if map_making_direction == 0:
-                pygame.draw.polygon(screen, GREEN, [(center_x, center_y - arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
-            elif map_making_direction == 1:
-                pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 5), (center_x + 5, center_y)])
-            elif map_making_direction == 2:
-                pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
-            elif map_making_direction == 3:
-                pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 5), (center_x + 5, center_y)])
-            elif map_making_direction == 4:
-                pygame.draw.polygon(screen, GREEN, [(center_x, center_y + arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
-            elif map_making_direction == 5:
-                pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y + arrow_length), (center_x - 5, center_y), (center_x, center_y + 5)])
-            elif map_making_direction == 6:
-                pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
-            elif map_making_direction == 7:
-                pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y - arrow_length), (center_x - 5, center_y), (center_x, center_y - 5)])
+        lift_rect = progress_font.render(lift_text, True, WHITE).get_rect(bottomleft=(image_display_area.left + sidebar_padding, image_display_area.bottom - sidebar_padding))
+        lift_hovered = lift_rect.collidepoint(mouse_pos)
+        lift_surface = progress_font.render(lift_text, True, LINK_HOVER_COLOR if lift_hovered else WHITE)
+        screen.blit(lift_surface, lift_rect.topleft)
+        if lift_hovered:
+            pygame.draw.line(screen, LINK_HOVER_COLOR, (lift_rect.left, lift_rect.bottom - 2), (lift_rect.right, lift_rect.bottom - 2), 1)
+
+        if not free_move_mode:
+            map_making_arrow_rect = pygame.Rect(image_display_area.right - 30, image_display_area.bottom - 30, 20, 20)
+            if map_making_direction is None:
+                pygame.draw.circle(screen, GREEN, map_making_arrow_rect.center, 10)
+            else:
+                center_x, center_y = map_making_arrow_rect.center
+                arrow_length = 10
+                if map_making_direction == 0:
+                    pygame.draw.polygon(screen, GREEN, [(center_x, center_y - arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+                elif map_making_direction == 1:
+                    pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 5), (center_x + 5, center_y)])
+                elif map_making_direction == 2:
+                    pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+                elif map_making_direction == 3:
+                    pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 5), (center_x + 5, center_y)])
+                elif map_making_direction == 4:
+                    pygame.draw.polygon(screen, GREEN, [(center_x, center_y + arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+                elif map_making_direction == 5:
+                    pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y + arrow_length), (center_x - 5, center_y), (center_x, center_y + 5)])
+                elif map_making_direction == 6:
+                    pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+                elif map_making_direction == 7:
+                    pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y - arrow_length), (center_x - 5, center_y), (center_x, center_y - 5)])
 
     else:
         hide_hovered = hide_rect.collidepoint(mouse_pos)
@@ -1104,7 +1123,7 @@ async def update_loop():
                 dialog_y = (screen_height - dialog_height) // 2
                 info_dialog.set_position((dialog_x, dialog_y))
         elif event.type == pygame.KEYDOWN:
-            if map_making_mode:
+            if map_making_mode and not free_move_mode:
                 if event.key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT):
                     pressed_keys.add(event.key)
                     set_map_making_direction()
@@ -1112,7 +1131,7 @@ async def update_loop():
                     assign_next_tile()
                 elif event.key in (pygame.K_LSHIFT, pygame.K_RSHIFT):
                     preview_next_image = True
-            else:
+            elif map_making_mode and free_move_mode or not map_making_mode:
                 if event.key == pygame.K_e:
                     toggle_edit_mode()
                 elif event.key == pygame.K_UP:
@@ -1122,7 +1141,7 @@ async def update_loop():
                 elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
                     rotate_player(event.key)
         elif event.type == pygame.KEYUP:
-            if map_making_mode:
+            if map_making_mode and not free_move_mode:
                 if event.key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT):
                     pressed_keys.discard(event.key)
                     set_map_making_direction()
@@ -1130,8 +1149,11 @@ async def update_loop():
                     preview_next_image = False
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:
-                if map_making_mode and exit_map_making_rect.collidepoint(event.pos):
-                    exit_map_making()
+                if map_making_mode:
+                    if exit_map_making_rect.collidepoint(event.pos):
+                        exit_map_making()
+                    elif lift_rect.collidepoint(event.pos):
+                        toggle_free_move_mode()
                 elif not map_making_mode:
                     if hide_rect.collidepoint(event.pos) and not maximized:
                         toggle_sidebar()
