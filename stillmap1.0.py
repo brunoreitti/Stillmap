@@ -15,6 +15,7 @@ import ctypes
 from tkinter import TclError
 
 pygame.init()
+pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "0,0"
 
@@ -124,6 +125,17 @@ pressed_keys = set()
 preview_next_image = False
 
 tiles = {}
+
+turn_flag = False
+move_flag = False
+
+turn_sound = None
+move_sound = None
+try:
+    turn_sound = pygame.mixer.Sound('sound1.wav')
+    move_sound = pygame.mixer.Sound('sound2.wav')
+except:
+    pass
 
 class Tile:
     def __init__(self, size):
@@ -574,7 +586,7 @@ def draw_view(mouse_pos, map_offset_x, map_offset_y, SQUARE_SIZE, BOARD_SIZE, ta
         return scaled_tile_size, offset_x, offset_y, 0, 0, scale
 
 def move_player(forward=True):
-    global player_pos
+    global player_pos, move_flag
     direction = player_direction if forward else (player_direction + 4) % 8
     dr, dc = DIRECTIONS[direction]
     new_r = player_pos[0] + dr
@@ -582,19 +594,24 @@ def move_player(forward=True):
     new_pos = (new_r, new_c)
     if new_pos in tiles and tiles[new_pos].active:
         player_pos = [new_r, new_c]
+        move_flag = True
+        return True
+    return False
 
 def rotate_player(key):
-    global player_direction, current_image_index
+    global player_direction, current_image_index, turn_flag
     if key == pygame.K_LEFT:
         player_direction = (player_direction - 1) % 8
         current_tile = get_current_tile()
         if current_tile and current_tile.images:
             current_image_index = (current_image_index - 1) % len(current_tile.images)
+            turn_flag = True
     elif key == pygame.K_RIGHT:
         player_direction = (player_direction + 1) % 8
         current_tile = get_current_tile()
         if current_tile and current_tile.images:
             current_image_index = (current_image_index + 1) % len(current_tile.images)
+            turn_flag = True
 
 def toggle_edit_mode():
     global edit_mode
@@ -772,7 +789,7 @@ def set_map_making_direction():
             map_making_direction = 6
 
 def assign_next_tile():
-    global map_making_index, player_pos, map_making_direction
+    global map_making_index, player_pos, map_making_direction, move_flag
     if map_making_direction is not None and map_making_index + 1 < map_making_total:
         dr, dc = DIRECTIONS[map_making_direction]
         new_r = player_pos[0] + dr
@@ -787,6 +804,7 @@ def assign_next_tile():
         map_making_index += 1
         map_making_direction = None
         pressed_keys.clear()
+        move_flag = True
 
 manager = pygame_gui.UIManager((800, 600), theme_path=None)
 manager.get_theme().load_theme({
@@ -904,7 +922,7 @@ async def setup():
     player_pos = [0, 0]
 
 async def update_loop():
-    global screen_width, screen_height, effective_screen_height, current_image_index, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, button_height, separator_height, sidebar_gap, sidebar_rect, map_offset_x, map_offset_y, BOARD_SIZE, SQUARE_SIZE, separator_y, bottom_container_y_start, image_display_area, hide_hovered, map_hovered, info_hovered, exit_map_making_hovered, lift_hovered, lift_text, info_dialog, close_info_button, map_making_arrow_rect, preview_next_image
+    global screen_width, screen_height, effective_screen_height, current_image_index, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, button_height, separator_height, sidebar_gap, sidebar_rect, map_offset_x, map_offset_y, BOARD_SIZE, SQUARE_SIZE, separator_y, bottom_container_y_start, image_display_area, hide_hovered, map_hovered, info_hovered, exit_map_making_hovered, lift_hovered, lift_text, info_dialog, close_info_button, map_making_arrow_rect, preview_next_image, turn_flag, move_flag
     if 'current_image_index' not in globals():
         current_image_index = 0
 
@@ -1176,6 +1194,13 @@ async def update_loop():
     manager.update(1.0 / FPS)
     manager.draw_ui(screen)
     pygame.display.flip()
+
+    if turn_flag and turn_sound:
+        turn_sound.play()
+        turn_flag = False
+    if move_flag and move_sound:
+        move_sound.play()
+        move_flag = False
 
 async def main():
     await setup()
