@@ -13,6 +13,9 @@ import cairosvg
 from datetime import datetime
 import ctypes
 from tkinter import TclError
+import shutil
+import tempfile
+import zipfile
 
 pygame.init()
 pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
@@ -60,8 +63,10 @@ root = Tk()
 root.withdraw()
 current_image_index = 0
 save_directory = os.path.join(os.getenv("LOCALAPPDATA"), "Stillmap", "saved_game_states")
+shared_maps_dir = os.path.join(os.getenv("LOCALAPPDATA"), "Stillmap", "shared_maps")
 try:
     os.makedirs(save_directory, exist_ok=True)
+    os.makedirs(shared_maps_dir, exist_ok=True)
     test_file = os.path.join(save_directory, ".test_write_access")
     with open(test_file, "w") as f:
         f.write("test")
@@ -687,6 +692,105 @@ def load_game_state():
     except Exception as e:
         messagebox.showerror("Error", f"Failed to load game: {str(e)}")
 
+def export_map():
+    selected_file = filedialog.askopenfilename(
+        title="Select a saved game to export",
+        initialdir=save_directory,
+        filetypes=[("JSON files", "*.json")]
+    )
+    if not selected_file:
+        return
+    try:
+        with open(selected_file, "r") as file:
+            game_state = json.load(file)
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to load game state: {str(e)}")
+        return
+
+    # Get the base filename without extension
+    base_filename = os.path.splitext(os.path.basename(selected_file))[0]
+    downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+    
+    # Handle potential file overwrite by appending a number if the file exists
+    zip_path = os.path.join(downloads_dir, f"{base_filename}.zip")
+    counter = 1
+    while os.path.exists(zip_path):
+        zip_path = os.path.join(downloads_dir, f"{base_filename}_{counter}.zip")
+        counter += 1
+
+    try:
+        temp_dir = tempfile.mkdtemp()
+        images_dir = os.path.join(temp_dir, "images")
+        os.makedirs(images_dir)
+        new_tiles = {}
+        for str_pos, tile_data in game_state["tiles"].items():
+            inner = str_pos[1:-1]
+            r, c = map(int, inner.split(','))
+            pos = (r, c)
+            if tile_data.get("directory"):
+                tile_folder = f"tile_{str(r).replace('-', 'm')}_{str(c).replace('-', 'm')}"
+                new_tile_dir = os.path.join(images_dir, tile_folder)
+                os.makedirs(new_tile_dir)
+                for img_file in tile_data["image_filenames"]:
+                    src = os.path.join(tile_data["directory"], img_file)
+                    if os.path.exists(src):
+                        dst = os.path.join(new_tile_dir, img_file)
+                        shutil.copy(src, dst)
+                new_tiles[str_pos] = {**tile_data, "directory": tile_folder}
+            else:
+                new_tiles[str_pos] = tile_data
+        game_state["tiles"] = new_tiles
+        json_path = os.path.join(temp_dir, "game_state.json")
+        with open(json_path, "w") as f:
+            json.dump(game_state, f, indent=4)
+
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            for root, dirs, files in os.walk(temp_dir):
+                for file in files:
+                    zipf.write(os.path.join(root, file), os.path.relpath(os.path.join(root, file), temp_dir))
+
+        shutil.rmtree(temp_dir)
+        messagebox.showinfo("Success", f"Map exported to {zip_path}")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to export map: {str(e)}")
+    restore_pygame_focus()
+
+def import_map():
+    zip_path = filedialog.askopenfilename(
+        title="Select Map Package",
+        filetypes=[("ZIP files", "*.zip")]
+    )
+    if not zip_path:
+        return
+
+    map_name = simpledialog.askstring("Map Name", "Enter the map name:")
+    if not map_name:
+        return
+
+    extract_dir = os.path.join(shared_maps_dir, map_name)
+    os.makedirs(extract_dir, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zipf:
+            zipf.extractall(extract_dir)
+
+        json_path = os.path.join(extract_dir, "game_state.json")
+        with open(json_path, "r") as f:
+            game_state = json.load(f)
+
+        for str_pos, tile_data in game_state["tiles"].items():
+            if "directory" in tile_data and tile_data["directory"]:
+                tile_data["directory"] = os.path.join(extract_dir, "images", tile_data["directory"])
+
+        save_path = os.path.join(save_directory, f"{map_name}.json")
+        with open(save_path, "w") as f:
+            json.dump(game_state, f, indent=4)
+
+        messagebox.showinfo("Success", f"Map imported and saved as {map_name}.json")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to import map: {str(e)}")
+    restore_pygame_focus()
+
 def show_info_dialog():
     global info_dialog, close_info_button
     if info_dialog is None:
@@ -845,6 +949,8 @@ bottom_container_buttons = [
     pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Load Game", manager=manager),
     pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Remove Folder", manager=manager),
     pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Map Maker", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Map Share", manager=manager),
+    pygame_gui.elements.UIButton(relative_rect=pygame.Rect(0, 0, 120, 40), text="Install Map", manager=manager),
 ]
 
 sidebar_visible = True
@@ -1184,6 +1290,10 @@ async def update_loop():
                     remove_current_tile_folder()
                 elif event.ui_element == bottom_container_buttons[4] and sidebar_visible and not maximized:
                     start_map_making()
+                elif event.ui_element == bottom_container_buttons[5] and sidebar_visible and not maximized:
+                    export_map()
+                elif event.ui_element == bottom_container_buttons[6] and sidebar_visible and not maximized:
+                    import_map()
                 elif event.ui_element == close_info_button:
                     if info_dialog:
                         info_dialog.kill()
