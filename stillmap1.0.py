@@ -682,6 +682,10 @@ def load_game_state():
             tiles[pos].image_filenames = tile_data["image_filenames"]
             if tile_data["directory"]:
                 tiles[pos].images, _ = load_images_from_directory(tile_data["directory"])
+        # Remove inactive tiles after loading
+        to_remove = [pos for pos, tile in tiles.items() if not tile.active]
+        for pos in to_remove:
+            del tiles[pos]
         current_tile = get_current_tile()
         current_image_index = player_direction if current_tile and current_tile.images else 0
         restore_pygame_focus()
@@ -1235,6 +1239,8 @@ async def update_loop():
                             new_pos = (new_r, new_c)
                             if new_pos in tiles:
                                 tiles[new_pos].toggle_active()
+                                if not tiles[new_pos].active:
+                                    del tiles[new_pos]
                             else:
                                 tiles[new_pos] = Tile(SQUARE_SIZE)
                                 tiles[new_pos].active = True
@@ -1267,6 +1273,8 @@ async def update_loop():
                                 new_pos = (new_r, new_c)
                                 if new_pos in tiles:
                                     tiles[new_pos].toggle_active()
+                                    if not tiles[new_pos].active:
+                                        del tiles[new_pos]
                                 else:
                                     tiles[new_pos] = Tile(scaled_tile_size)
                                     tiles[new_pos].active = True
