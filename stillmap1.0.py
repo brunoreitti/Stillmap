@@ -100,6 +100,10 @@ bottom_container_y_start = 0
 sidebar_rect = pygame.Rect(0, 0, 0, 0)
 image_display_area = pygame.Rect(0, 0, 0, 0)
 
+# Rects for the two sidebar "category boxes"
+group1_box_rect = pygame.Rect(0, 0, 0, 0)
+group2_box_rect = pygame.Rect(0, 0, 0, 0)
+
 DEFAULT_IMAGE_PATH = 'image_path_logo9.svg'
 default_image_cv2 = None
 
@@ -161,7 +165,7 @@ except:
 
 # Sidebar links with dynamic Edit Mode text
 sidebar_links = [
-    lambda: f"Edit Mode: {'On' if edit_mode else 'Off'}",  # Dynamic text based on edit_mode
+    lambda: f"Edit Mode: {'On' if edit_mode else 'Off'}",
     lambda: f"Audio Mode: {'On' if audio_mode else 'Off'}",
     "Select Folder",
     "Save Game",
@@ -171,6 +175,11 @@ sidebar_links = [
     "Map Share",
     "Install Map"
 ]
+
+# Group indices for category boxes
+GROUP1_INDICES = [0, 1, 2, 5]         # modes + folder tools
+GROUP2_INDICES = [3, 4, 6, 7, 8]      # save/load + map tools
+
 sidebar_link_rects = []
 sidebar_link_hovered = [False] * len(sidebar_links)
 
@@ -202,6 +211,7 @@ manager.get_theme().load_theme({
     }
 })
 
+
 class Tile:
     def __init__(self, size):
         self.size = size
@@ -230,7 +240,7 @@ class Tile:
             inner_rect = draw_rect.inflate(-inner_size, -inner_size)
             pygame.draw.rect(target, GREEN, inner_rect, 1)
         if self.active and self.audio_path:
-            pygame.draw.circle(target, BLUE, draw_rect.center, 2)  # Reduced dot size from 3 to 2
+            pygame.draw.circle(target, BLUE, draw_rect.center, 2)
 
     def toggle_active(self):
         self.active = not self.active
@@ -248,13 +258,16 @@ class Tile:
         self.images = []
         self.image_filenames = []
 
+
 center_pos = (0, 0)
 tiles[center_pos] = Tile(0)
 tiles[center_pos].active = True
 
+
 def get_current_tile():
     pos = tuple(player_pos)
     return tiles.get(pos)
+
 
 def load_image(filepath):
     try:
@@ -270,13 +283,15 @@ def load_image(filepath):
     except Exception:
         return None
 
+
 def cv2_to_pygame(image):
     if image.shape[2] == 4:
         image_rgba = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
         return pygame.image.frombuffer(image_rgba.tobytes(), image_rgba.shape[1::-1], 'RGBA')
     else:
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        return pygame.image.frombuffer(image_rgb.tobytes(), image_rgba.shape[1::-1], 'RGB')
+        return pygame.image.frombuffer(image_rgb.tobytes(), image_rgb.shape[1::-1], 'RGB')
+
 
 def load_svg_image(svg_path, output_width=None, output_height=None):
     try:
@@ -287,7 +302,9 @@ def load_svg_image(svg_path, output_width=None, output_height=None):
     except Exception:
         return None
 
+
 default_image_cv2 = load_image(DEFAULT_IMAGE_PATH)
+
 
 def display_image(current_image, display_area, is_pygame_surface=False, scale_multiplier=1.0):
     if current_image is not None:
@@ -295,7 +312,7 @@ def display_image(current_image, display_area, is_pygame_surface=False, scale_mu
             img_width, img_height = current_image.get_size()
         else:
             img_height, img_width = current_image.shape[:2]
-        
+
         scale_factor = min(display_area.width / img_width, display_area.height / img_height)
         new_width = int(img_width * scale_factor * scale_multiplier)
         new_height = int(img_height * scale_factor * scale_multiplier)
@@ -311,6 +328,7 @@ def display_image(current_image, display_area, is_pygame_surface=False, scale_mu
         return image_rect
     return None
 
+
 def load_images_from_directory(directory):
     images = []
     filenames = []
@@ -323,9 +341,11 @@ def load_images_from_directory(directory):
         filenames.append(filename)
     return images, filenames
 
+
 def open_file_explorer():
     directory = filedialog.askdirectory()
     return directory
+
 
 def get_image_date(image_path):
     try:
@@ -340,6 +360,7 @@ def get_image_date(image_path):
         return None
     return None
 
+
 def resize_image(input_path, output_path, max_dimension=2400):
     with Image.open(input_path) as img:
         img = ImageOps.exif_transpose(img)
@@ -352,6 +373,7 @@ def resize_image(input_path, output_path, max_dimension=2400):
             new_width = int(original_width * (max_dimension / original_height))
         resized_image = img.resize((new_width, new_height), Image.LANCZOS)
         resized_image.save(output_path, quality=95, exif=img.info.get('exif'))
+
 
 def organize_photos(input_directory, max_dimension=2400):
     global screen_width, effective_screen_height
@@ -366,15 +388,15 @@ def organize_photos(input_directory, max_dimension=2400):
                 creation_date = os.path.getctime(file_path)
                 modification_date = os.path.getmtime(file_path)
                 files.append((f, min(creation_date, modification_date)))
-    
+
     files.sort(key=lambda x: x[1])
     sorted_files = [f[0] for f in files]
     total_files = len(sorted_files)
-    
+
     output_directory = os.path.join(input_directory, "organized_photos")
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
-    
+
     batch_size = 8
     processed_files = 0
     bar_width = 400
@@ -382,7 +404,7 @@ def organize_photos(input_directory, max_dimension=2400):
     bar_x = (screen_width - bar_width) // 2
     bar_y = (effective_screen_height - bar_height) // 2
     progress_surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
-    font = pygame.font.Font(None, 36)
+    font_local = pygame.font.Font(None, 36)
     console_font = pygame.font.Font(None, 18)
 
     card_padding = 20
@@ -404,7 +426,7 @@ def organize_photos(input_directory, max_dimension=2400):
         folder_name = str((i // batch_size) + 1)
         new_folder_path = os.path.join(output_directory, folder_name)
         os.makedirs(new_folder_path, exist_ok=True)
-        
+
         for j in range(batch_size):
             if i + j < len(sorted_files):
                 src_file = os.path.join(input_directory, sorted_files[i + j])
@@ -412,7 +434,7 @@ def organize_photos(input_directory, max_dimension=2400):
                 resize_image(src_file, dst_file, max_dimension)
                 processed_files += 1
                 console_lines.append(f"Processed: {sorted_files[i + j]} -> {dst_file}")
-                
+
                 for frame in range(3):
                     animation_offset = (3 - frame) * 3
                     progress = processed_files / total_files
@@ -427,7 +449,7 @@ def organize_photos(input_directory, max_dimension=2400):
 
                     text_clear_rect = pygame.Rect(card_x, card_y, card_width, 40)
                     progress_surface.fill(CARD_BG_COLOR, text_clear_rect)
-                    main_text = font.render(f"Organizing Photos: {int(progress * 100)}%", True, (0, 0, 0))
+                    main_text = font_local.render(f"Organizing Photos: {int(progress * 100)}%", True, (0, 0, 0))
                     main_text_rect = main_text.get_rect(center=(screen_width // 2, card_y + 40))
                     progress_surface.blit(main_text, main_text_rect)
 
@@ -442,7 +464,8 @@ def organize_photos(input_directory, max_dimension=2400):
                         text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height + animation_offset))
                         if text_rect.top >= console_rect.top:
                             if text_rect.right > console_rect.right:
-                                clipped_text = line[:int((console_rect.right - text_rect.left) / (console_font.size('a')[0]))]
+                                max_chars = int((console_rect.right - text_rect.left) / (console_font.size('a')[0]))
+                                clipped_text = line[:max_chars]
                                 console_text = console_font.render(clipped_text, True, (255, 255, 255))
                                 text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height + animation_offset))
                             progress_surface.blit(console_text, text_rect)
@@ -465,7 +488,7 @@ def organize_photos(input_directory, max_dimension=2400):
 
         text_clear_rect = pygame.Rect(card_x, card_y, card_width, 40)
         progress_surface.fill(CARD_BG_COLOR, text_clear_rect)
-        main_text = font.render(f"Organizing Photos: {int(progress * 100)}%", True, (0, 0, 0))
+        main_text = font_local.render(f"Organizing Photos: {int(progress * 100)}%", True, (0, 0, 0))
         main_text_rect = main_text.get_rect(center=(screen_width // 2, card_y + 40))
         progress_surface.blit(main_text, main_text_rect)
 
@@ -480,24 +503,27 @@ def organize_photos(input_directory, max_dimension=2400):
             text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height))
             if text_rect.top >= console_rect.top:
                 if text_rect.right > console_rect.right:
-                    clipped_text = line[:int((console_rect.right - text_rect.left) / (console_font.size('a')[0]))]
+                    max_chars = int((console_rect.right - text_rect.left) / (console_font.size('a')[0]))
+                    clipped_text = line[:max_chars]
                     console_text = console_font.render(clipped_text, True, (255, 255, 255))
                     text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height))
                 progress_surface.blit(console_text, text_rect)
 
         screen.blit(progress_surface, (0, 0))
         pygame.display.flip()
-        
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return
             manager.process_events(event)
 
+
 def restore_pygame_focus():
     if sys.platform == "win32":
-        hwnd = pygame.display.get_wm_info()['window']
-        ctypes.windll.user32.SetForegroundWindow(hwnd)
-        ctypes.windll.user32.SetFocus(hwnd)
+        hwnd_local = pygame.display.get_wm_info()['window']
+        ctypes.windll.user32.SetForegroundWindow(hwnd_local)
+        ctypes.windll.user32.SetFocus(hwnd_local)
+
 
 DIRECTIONS = [
     (-1, 0),
@@ -509,6 +535,7 @@ DIRECTIONS = [
     (0, -1),
     (-1, -1)
 ]
+
 
 def draw_view(mouse_pos, map_offset_x, map_offset_y, SQUARE_SIZE, BOARD_SIZE, target, maximized=False):
     center_x = map_offset_x + (BOARD_SIZE / 2)
@@ -627,6 +654,7 @@ def draw_view(mouse_pos, map_offset_x, map_offset_y, SQUARE_SIZE, BOARD_SIZE, ta
             pygame.draw.polygon(target, arrow_color, [(player_screen_x - arrow_length, player_screen_y - arrow_length), (player_screen_x - 10, player_screen_y), (player_screen_x, player_screen_y - 10)])
         return scaled_tile_size, offset_x, offset_y, 0, 0, scale
 
+
 def move_player(forward=True):
     global player_pos, move_flag
     direction = player_direction if forward else (player_direction + 4) % 8
@@ -640,6 +668,7 @@ def move_player(forward=True):
         play_tile_audio()
         return True
     return False
+
 
 def rotate_player(key):
     global player_direction, current_image_index, turn_flag
@@ -656,9 +685,11 @@ def rotate_player(key):
             current_image_index = (current_image_index + 1) % len(current_tile.images)
             turn_flag = True
 
+
 def toggle_edit_mode():
     global edit_mode
     edit_mode = not edit_mode
+
 
 def toggle_audio_mode():
     global audio_mode, selected_audio_path
@@ -677,20 +708,23 @@ def toggle_audio_mode():
         selected_audio_path = None
         play_tile_audio()
 
+
 def toggle_audio_mute():
     global audio_muted, audio_mute_text, current_audio_path
     audio_muted = not audio_muted
     audio_mute_text = "Mute Audio" if not audio_muted else "Unmute Audio"
     if audio_muted:
         pygame.mixer.music.stop()
-        current_audio_path = None  # Reset to force reload on unmute
+        current_audio_path = None
     else:
         play_tile_audio()
+
 
 def remove_current_tile_folder():
     current_tile = get_current_tile()
     if current_tile:
         current_tile.clear_directory()
+
 
 def save_game_state():
     filename = simpledialog.askstring("Save Game", "Enter the save file name:")
@@ -713,6 +747,7 @@ def save_game_state():
         json.dump(game_state, f)
     messagebox.showinfo("Save Game", f"Game saved to {filepath}")
 
+
 def load_game_state():
     filepath = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")], initialdir=save_directory)
     if not filepath:
@@ -720,6 +755,7 @@ def load_game_state():
     with open(filepath, 'r') as f:
         game_state = json.load(f)
     player_pos[:] = game_state["player_pos"]
+    global player_direction, current_image_index
     player_direction = game_state["player_direction"]
     tiles.clear()
     for pos_str, tile_data in game_state["tiles"].items():
@@ -732,6 +768,7 @@ def load_game_state():
         tiles[pos] = tile
     current_image_index = 0
     play_tile_audio()
+
 
 def export_map():
     filename = simpledialog.askstring("Export Map", "Enter the map file name:")
@@ -762,10 +799,11 @@ def export_map():
         with open(map_json_path, 'w') as f:
             json.dump(map_data, f)
         with zipfile.ZipFile(filepath, 'w') as zipf:
-            for root, _, files in os.walk(temp_dir):
+            for root_dir, _, files in os.walk(temp_dir):
                 for file in files:
-                    zipf.write(os.path.join(root, file), os.path.relpath(os.path.join(root, file), temp_dir))
+                    zipf.write(os.path.join(root_dir, file), os.path.relpath(os.path.join(root_dir, file), temp_dir))
     messagebox.showinfo("Export Map", f"Map exported to {filepath}")
+
 
 def import_map():
     filepath = filedialog.askopenfilename(filetypes=[("ZIP files", "*.zip")], initialdir=shared_maps_dir)
@@ -792,10 +830,12 @@ def import_map():
         tile.audio_path = os.path.join(extract_dir, tile_data["audio_path"]) if "audio_path" in tile_data else None
         tiles[pos] = tile
     player_pos[:] = [0, 0]
+    global player_direction, current_image_index
     player_direction = 0
     current_image_index = 0
     play_tile_audio()
     messagebox.showinfo("Import Map", "Map imported successfully.")
+
 
 def show_info_dialog():
     global info_dialog, close_info_button, screen_width, screen_height
@@ -815,28 +855,63 @@ def show_info_dialog():
         container=info_dialog
     )
 
+
+# Map Maker: behaves like old version, but uses "organized_photos" if present
 def start_map_making():
-    global map_making_mode, map_making_folders, map_making_index, map_making_total, map_making_direction, preview_next_image, free_move_mode
+    global map_making_mode, map_making_folders, map_making_index, map_making_total
+    global map_making_direction, preview_next_image, free_move_mode
+
     directory = open_file_explorer()
-    if directory:
-        organize_photos(directory)
-        organized_dir = os.path.join(directory, "organized_photos")
-        map_making_folders = [os.path.join(organized_dir, f) for f in os.listdir(organized_dir) if os.path.isdir(os.path.join(organized_dir, f))]
-        map_making_folders.sort(key=lambda x: int(os.path.basename(x)) if os.path.basename(x).isdigit() else x)
-        map_making_total = len(map_making_folders)
-        if map_making_total > 0:
-            map_making_mode = True
-            map_making_index = 0
-            map_making_direction = None
-            preview_next_image = False
-            free_move_mode = False
-            current_tile = get_current_tile()
-            if current_tile:
-                current_tile.set_directory(map_making_folders[0])
-            restore_pygame_focus()
+    if not directory:
+        return
+
+    organized_dir = os.path.join(directory, "organized_photos")
+    if os.path.isdir(organized_dir):
+        root_dir = organized_dir
+    else:
+        root_dir = directory
+
+    map_making_folders = [
+        os.path.join(root_dir, d)
+        for d in os.listdir(root_dir)
+        if os.path.isdir(os.path.join(root_dir, d))
+    ]
+
+    map_making_folders = [
+        d for d in map_making_folders
+        if any(
+            f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))
+            for f in os.listdir(d)
+        )
+    ]
+
+    def folder_sort_key(path):
+        name = os.path.basename(path)
+        return int(name) if name.isdigit() else name
+
+    map_making_folders.sort(key=folder_sort_key)
+
+    map_making_total = len(map_making_folders)
+    if map_making_total == 0:
+        messagebox.showwarning("Map Maker", "No image folders found.")
+        return
+
+    map_making_mode = True
+    map_making_index = 0
+    map_making_direction = None
+    preview_next_image = False
+    free_move_mode = False
+
+    current_tile = get_current_tile()
+    if current_tile:
+        current_tile.set_directory(map_making_folders[0])
+
+    restore_pygame_focus()
+
 
 def exit_map_making():
-    global map_making_mode, map_making_folders, map_making_index, map_making_total, map_making_direction, preview_next_image, free_move_mode
+    global map_making_mode, map_making_folders, map_making_index, map_making_total
+    global map_making_direction, preview_next_image, free_move_mode, current_image_index
     map_making_mode = False
     map_making_folders = []
     map_making_index = 0
@@ -849,6 +924,7 @@ def exit_map_making():
     if current_tile and current_tile.images:
         current_image_index = 0
 
+
 def toggle_free_move_mode():
     global free_move_mode, lift_text, map_making_direction, pressed_keys
     free_move_mode = not free_move_mode
@@ -856,6 +932,7 @@ def toggle_free_move_mode():
     if not free_move_mode:
         map_making_direction = None
         pressed_keys.clear()
+
 
 def set_map_making_direction():
     global map_making_direction
@@ -877,6 +954,7 @@ def set_map_making_direction():
         elif pygame.K_LEFT in pressed_keys:
             map_making_direction = 6
 
+
 def assign_next_tile():
     global map_making_index, player_pos, map_making_direction, move_flag
     if map_making_direction is not None and map_making_index + 1 < map_making_total:
@@ -895,8 +973,10 @@ def assign_next_tile():
         pressed_keys.clear()
         move_flag = True
 
+
 sidebar_visible = True
 maximized = False
+
 
 def toggle_sidebar():
     global sidebar_visible, maximized, hide_text
@@ -904,6 +984,7 @@ def toggle_sidebar():
     hide_text = "Show" if not sidebar_visible else "Hide"
     if not maximized:
         update_button_positions()
+
 
 def toggle_maximize():
     global maximized, sidebar_visible, map_text
@@ -916,12 +997,24 @@ def toggle_maximize():
         map_text = "Map"
         update_button_positions()
 
+
 def update_button_positions():
-    global screen_width, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, map_offset_x, map_offset_y, BOARD_SIZE, sidebar_rect, image_display_area, hide_rect, map_rect, info_rect, sidebar_link_rects
+    global screen_width, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, map_offset_x, map_offset_y, BOARD_SIZE
+    global sidebar_rect, image_display_area, hide_rect, map_rect, info_rect, sidebar_link_rects
+    global bottom_container_y_start, group1_box_rect, group2_box_rect
+
+    # Top buttons (Hide / Map / Info)
     if sidebar_visible and not maximized:
-        hide_rect = font.render(hide_text, True, WHITE).get_rect(topleft=(sidebar_rect.left + sidebar_padding, sidebar_rect.top + sidebar_padding))
-        map_rect = font.render(map_text, True, WHITE).get_rect(topleft=(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - font.size(map_text)[0], sidebar_rect.top + sidebar_padding))
-        info_rect = font.render(info_text, True, WHITE).get_rect(bottomright=(sidebar_rect.right - sidebar_padding, sidebar_rect.bottom - sidebar_padding))
+        hide_rect = font.render(hide_text, True, WHITE).get_rect(
+            topleft=(sidebar_rect.left + sidebar_padding, sidebar_rect.top + sidebar_padding)
+        )
+        map_rect = font.render(map_text, True, WHITE).get_rect(
+            topleft=(sidebar_rect.left + SIDEBAR_WIDTH - sidebar_padding - font.size(map_text)[0],
+                     sidebar_rect.top + sidebar_padding)
+        )
+        info_rect = font.render(info_text, True, WHITE).get_rect(
+            bottomright=(sidebar_rect.right - sidebar_padding, sidebar_rect.bottom - sidebar_padding)
+        )
     elif not maximized:
         button_x = image_display_area.right - font.size(hide_text)[0] - 5
         button_y = top_bar_height + sidebar_padding
@@ -930,23 +1023,48 @@ def update_button_positions():
         info_rect = pygame.Rect(-1000, -1000, 0, 0)
     else:
         hide_rect = pygame.Rect(-1000, -1000, 0, 0)
-        map_rect = font.render(map_text, True, WHITE).get_rect(topleft=(screen_width - font.size(map_text)[0] - 10, top_bar_height + 10))
+        map_rect = font.render(map_text, True, WHITE).get_rect(
+            topleft=(screen_width - font.size(map_text)[0] - 10, top_bar_height + 10)
+        )
         info_rect = pygame.Rect(-1000, -1000, 0, 0)
-    
-    # Update sidebar link rectangles with proper centering
-    sidebar_link_rects = []
-    link_y = bottom_container_y_start
-    sidebar_center_x = sidebar_rect.left + sidebar_rect.width // 2
-    for link in sidebar_links:
-        link_text = link() if callable(link) else link
-        link_surface = font.render(link_text, True, WHITE)
-        link_rect = link_surface.get_rect(center=(sidebar_center_x, link_y + font.get_height() // 2))
-        sidebar_link_rects.append(link_rect)
-        link_y += font.get_height() + sidebar_spacing
+
+    # Reset link rects and box rects
+    sidebar_link_rects = [pygame.Rect(0, 0, 0, 0) for _ in sidebar_links]
+    group1_box_rect = pygame.Rect(0, 0, 0, 0)
+    group2_box_rect = pygame.Rect(0, 0, 0, 0)
+
+    # Only layout links when sidebar is visible and not maximized
+    if not (sidebar_visible and not maximized):
+        return
+
+    box_width = sidebar_rect.width - 2 * sidebar_padding
+    line_h = font.get_height()
+    box_inner_pad = 8
+    box_gap = 15
+
+    current_y = bottom_container_y_start
+
+    def place_group(indices, start_y):
+        group_count = len(indices)
+        height = box_inner_pad * 2 + group_count * line_h + (group_count - 1) * sidebar_spacing
+        rect = pygame.Rect(sidebar_rect.left + sidebar_padding, start_y, box_width, height)
+        link_y = rect.top + box_inner_pad
+        for idx in indices:
+            link_text = sidebar_links[idx]() if callable(sidebar_links[idx]) else sidebar_links[idx]
+            link_surface = font.render(link_text, True, WHITE)
+            link_rect = link_surface.get_rect(left=rect.left + box_inner_pad, top=link_y)
+            sidebar_link_rects[idx] = link_rect
+            link_y += line_h + sidebar_spacing
+        return rect, rect.bottom + box_gap
+
+    group1_box_rect, current_y = place_group(GROUP1_INDICES, current_y)
+    group2_box_rect, current_y = place_group(GROUP2_INDICES, current_y)
+
 
 current_audio_path = None
 selected_tiles = set()
 selected_audio_path = None
+
 
 def play_tile_audio():
     global current_audio_path
@@ -969,20 +1087,30 @@ def play_tile_audio():
             pygame.mixer.music.stop()
             current_audio_path = None
 
+
 async def setup():
     global screen_width, screen_height, effective_screen_height, manager
     screen_width, screen_height = screen.get_size()
     effective_screen_height = screen_height
     manager.set_window_resolution((screen_width, screen_height))
-    center_pos = (0, 0)
-    if center_pos not in tiles:
-        tiles[center_pos] = Tile(0)
-        tiles[center_pos].active = True
-    player_pos = [0, 0]
+    center_pos_local = (0, 0)
+    if center_pos_local not in tiles:
+        tiles[center_pos_local] = Tile(0)
+        tiles[center_pos_local].active = True
+    player_pos[:] = [0, 0]
     play_tile_audio()
 
+
 async def update_loop():
-    global screen_width, screen_height, effective_screen_height, current_image_index, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, separator_height, sidebar_gap, sidebar_rect, map_offset_x, map_offset_y, BOARD_SIZE, SQUARE_SIZE, separator_y, bottom_container_y_start, image_display_area, hide_hovered, map_hovered, info_hovered, exit_map_making_hovered, lift_hovered, lift_text, info_dialog, close_info_button, map_making_arrow_rect, preview_next_image, turn_flag, move_flag, dropdown_open, tab_rects, sidebar_link_hovered, map_area_rect, audio_mute_text, audio_mute_rect, audio_mute_hovered
+    global screen_width, screen_height, effective_screen_height
+    global current_image_index, SIDEBAR_WIDTH, sidebar_padding, sidebar_spacing, separator_height, sidebar_gap
+    global sidebar_rect, map_offset_x, map_offset_y, BOARD_SIZE, SQUARE_SIZE, separator_y, bottom_container_y_start
+    global image_display_area, hide_hovered, map_hovered, info_hovered
+    global exit_map_making_hovered, lift_hovered, lift_text
+    global info_dialog, close_info_button, map_making_arrow_rect, preview_next_image
+    global turn_flag, move_flag, dropdown_open, tab_rects, sidebar_link_hovered, map_area_rect
+    global audio_mute_text, audio_mute_rect, audio_mute_hovered
+
     if 'current_image_index' not in globals():
         current_image_index = 0
 
@@ -997,8 +1125,12 @@ async def update_loop():
     separator_height = 2
     sidebar_gap = 20
 
-    sidebar_rect = pygame.Rect(screen_width - SIDEBAR_WIDTH - sidebar_padding, top_bar_height + sidebar_padding,
-                              SIDEBAR_WIDTH, effective_screen_height - top_bar_height - (sidebar_padding * 2))
+    sidebar_rect = pygame.Rect(
+        screen_width - SIDEBAR_WIDTH - sidebar_padding,
+        top_bar_height + sidebar_padding,
+        SIDEBAR_WIDTH,
+        effective_screen_height - top_bar_height - (sidebar_padding * 2)
+    )
 
     map_offset_x = sidebar_rect.left + sidebar_padding
     map_offset_y = sidebar_rect.top + sidebar_padding
@@ -1056,91 +1188,195 @@ async def update_loop():
             current_image = current_tile.images[current_image_index]
             display_image(current_image, inner_display_area, is_pygame_surface=True)
 
+    # Layout top buttons + sidebar link rects and box rects
     update_button_positions()
 
+    # Draw sidebar content (category boxes + links)
     if sidebar_visible and not maximized:
         pygame.draw.rect(screen, SEPARATOR_COLOR, (map_offset_x, separator_y, map_width, separator_height))
-        sidebar_center_x = sidebar_rect.left + sidebar_rect.width // 2
-        for i, (link, link_rect) in enumerate(zip(sidebar_links, sidebar_link_rects)):
+
+        # Draw box shadows + cards
+        shadow_offset = 3
+        shadow_color = (30, 30, 60)
+        box_color = LIGHTER_BLUE
+
+        for box_rect in (group1_box_rect, group2_box_rect):
+            if box_rect.width > 0 and box_rect.height > 0:
+                shadow_rect = box_rect.move(shadow_offset, shadow_offset)
+                pygame.draw.rect(screen, shadow_color, shadow_rect, border_radius=8)
+                pygame.draw.rect(screen, box_color, box_rect, border_radius=8)
+
+        # Draw the links inside the boxes
+        for i in range(len(sidebar_links)):
+            link_rect = sidebar_link_rects[i]
+            link = sidebar_links[i]
             link_text = link() if callable(link) else link
             sidebar_link_hovered[i] = link_rect.collidepoint(mouse_pos)
             link_surface = font.render(link_text, True, LINK_HOVER_COLOR if sidebar_link_hovered[i] else WHITE)
-            centered_rect = link_surface.get_rect(center=(sidebar_center_x, link_rect.centery))
-            screen.blit(link_surface, centered_rect.topleft)
+            screen.blit(link_surface, link_rect.topleft)
             if sidebar_link_hovered[i]:
-                pygame.draw.line(screen, LINK_HOVER_COLOR, (centered_rect.left, centered_rect.bottom - 2), (centered_rect.right, centered_rect.bottom - 2), 1)
+                pygame.draw.line(
+                    screen,
+                    LINK_HOVER_COLOR,
+                    (link_rect.left, link_rect.bottom - 2),
+                    (link_rect.right, link_rect.bottom - 2),
+                    1
+                )
 
     if map_making_mode:
-        exit_map_making_rect = progress_font.render(exit_map_making_text, True, WHITE).get_rect(topleft=(image_display_area.left + sidebar_padding, image_display_area.top + sidebar_padding))
+        exit_map_making_rect_local = progress_font.render(exit_map_making_text, True, WHITE).get_rect(
+            topleft=(image_display_area.left + sidebar_padding, image_display_area.top + sidebar_padding)
+        )
+        exit_map_making_rect = exit_map_making_rect_local
         exit_map_making_hovered = exit_map_making_rect.collidepoint(mouse_pos)
-        exit_map_making_surface = progress_font.render(exit_map_making_text, True, LINK_HOVER_COLOR if exit_map_making_hovered else WHITE)
+        exit_map_making_surface = progress_font.render(
+            exit_map_making_text,
+            True,
+            LINK_HOVER_COLOR if exit_map_making_hovered else WHITE
+        )
         screen.blit(exit_map_making_surface, exit_map_making_rect.topleft)
         if exit_map_making_hovered:
-            pygame.draw.line(screen, LINK_HOVER_COLOR, (exit_map_making_rect.left, exit_map_making_rect.bottom - 2), (exit_map_making_rect.right, exit_map_making_rect.bottom - 2), 1)
+            pygame.draw.line(
+                screen,
+                LINK_HOVER_COLOR,
+                (exit_map_making_rect.left, exit_map_making_rect.bottom - 2),
+                (exit_map_making_rect.right, exit_map_making_rect.bottom - 2),
+                1
+            )
 
         progress_text = f"{map_making_index + 1}/{map_making_total} images done"
-        progress_rect = progress_font.render(progress_text, True, WHITE).get_rect(topleft=(image_display_area.left + sidebar_padding, image_display_area.top + sidebar_padding + 30))
+        progress_rect = progress_font.render(progress_text, True, WHITE).get_rect(
+            topleft=(image_display_area.left + sidebar_padding, image_display_area.top + sidebar_padding + 30)
+        )
         screen.blit(progress_font.render(progress_text, True, WHITE), progress_rect.topleft)
 
-        lift_rect = progress_font.render(lift_text, True, WHITE).get_rect(bottomleft=(image_display_area.left + sidebar_padding, image_display_area.bottom - sidebar_padding))
+        lift_rect_local = progress_font.render(lift_text, True, WHITE).get_rect(
+            bottomleft=(image_display_area.left + sidebar_padding, image_display_area.bottom - sidebar_padding)
+        )
+        lift_rect = lift_rect_local
         lift_hovered = lift_rect.collidepoint(mouse_pos)
         lift_surface = progress_font.render(lift_text, True, LINK_HOVER_COLOR if lift_hovered else WHITE)
         screen.blit(lift_surface, lift_rect.topleft)
         if lift_hovered:
-            pygame.draw.line(screen, LINK_HOVER_COLOR, (lift_rect.left, lift_rect.bottom - 2), (lift_rect.right, lift_rect.bottom - 2), 1)
+            pygame.draw.line(
+                screen,
+                LINK_HOVER_COLOR,
+                (lift_rect.left, lift_rect.bottom - 2),
+                (lift_rect.right, lift_rect.bottom - 2),
+                1
+            )
 
         if not free_move_mode:
             map_making_arrow_rect = pygame.Rect(image_display_area.right - 30, image_display_area.bottom - 30, 20, 20)
             if map_making_direction is None:
                 pygame.draw.circle(screen, GREEN, map_making_arrow_rect.center, 10)
             else:
-                center_x, center_y = map_making_arrow_rect.center
+                center_x_arrow, center_y_arrow = map_making_arrow_rect.center
                 arrow_length = 10
                 if map_making_direction == 0:
-                    pygame.draw.polygon(screen, GREEN, [(center_x, center_y - arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+                    pygame.draw.polygon(screen, GREEN, [
+                        (center_x_arrow, center_y_arrow - arrow_length),
+                        (center_x_arrow - 5, center_y_arrow),
+                        (center_x_arrow + 5, center_y_arrow)
+                    ])
                 elif map_making_direction == 1:
-                    pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 5), (center_x + 5, center_y)])
+                    pygame.draw.polygon(screen, GREEN, [
+                        (center_x_arrow + arrow_length, center_y_arrow - arrow_length),
+                        (center_x_arrow, center_y_arrow - 5),
+                        (center_x_arrow + 5, center_y_arrow)
+                    ])
                 elif map_making_direction == 2:
-                    pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+                    pygame.draw.polygon(screen, GREEN, [
+                        (center_x_arrow + arrow_length, center_y_arrow),
+                        (center_x_arrow, center_y_arrow - 5),
+                        (center_x_arrow, center_y_arrow + 5)
+                    ])
                 elif map_making_direction == 3:
-                    pygame.draw.polygon(screen, GREEN, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 5), (center_x + 5, center_y)])
+                    pygame.draw.polygon(screen, GREEN, [
+                        (center_x_arrow + arrow_length, center_y_arrow + arrow_length),
+                        (center_x_arrow, center_y_arrow + 5),
+                        (center_x_arrow + 5, center_y_arrow)
+                    ])
                 elif map_making_direction == 4:
-                    pygame.draw.polygon(screen, GREEN, [(center_x, center_y + arrow_length), (center_x - 5, center_y), (center_x + 5, center_y)])
+                    pygame.draw.polygon(screen, GREEN, [
+                        (center_x_arrow, center_y_arrow + arrow_length),
+                        (center_x_arrow - 5, center_y_arrow),
+                        (center_x_arrow + 5, center_y_arrow)
+                    ])
                 elif map_making_direction == 5:
-                    pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y + arrow_length), (center_x - 5, center_y), (center_x, center_y + 5)])
+                    pygame.draw.polygon(screen, GREEN, [
+                        (center_x_arrow - arrow_length, center_y_arrow + arrow_length),
+                        (center_x_arrow - 5, center_y_arrow),
+                        (center_x_arrow, center_y_arrow + 5)
+                    ])
                 elif map_making_direction == 6:
-                    pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y), (center_x, center_y - 5), (center_x, center_y + 5)])
+                    pygame.draw.polygon(screen, GREEN, [
+                        (center_x_arrow - arrow_length, center_y_arrow),
+                        (center_x_arrow, center_y_arrow - 5),
+                        (center_x_arrow, center_y_arrow + 5)
+                    ])
                 elif map_making_direction == 7:
-                    pygame.draw.polygon(screen, GREEN, [(center_x - arrow_length, center_y - arrow_length), (center_x - 5, center_y), (center_x, center_y - 5)])
+                    pygame.draw.polygon(screen, GREEN, [
+                        (center_x_arrow - arrow_length, center_y_arrow - arrow_length),
+                        (center_x_arrow - 5, center_y_arrow),
+                        (center_x_arrow, center_y_arrow - 5)
+                    ])
 
     else:
         hide_hovered = hide_rect.collidepoint(mouse_pos)
         map_hovered = map_rect.collidepoint(mouse_pos)
         info_hovered = info_rect.collidepoint(mouse_pos)
         audio_mute_text = "Mute Audio" if not audio_muted else "Unmute Audio"
-        audio_mute_rect = font.render(audio_mute_text, True, WHITE).get_rect(topright=(image_display_area.right - sidebar_padding, image_display_area.top + sidebar_padding))
+        audio_mute_rect = font.render(audio_mute_text, True, WHITE).get_rect(
+            topright=(image_display_area.right - sidebar_padding, image_display_area.top + sidebar_padding)
+        )
         audio_mute_hovered = audio_mute_rect.collidepoint(mouse_pos)
 
         hide_surface = font.render(hide_text, True, LINK_HOVER_COLOR if hide_hovered else WHITE)
         screen.blit(hide_surface, hide_rect.topleft)
         if hide_hovered:
-            pygame.draw.line(screen, LINK_HOVER_COLOR, (hide_rect.left, hide_rect.bottom - 2), (hide_rect.right, hide_rect.bottom - 2), 1)
+            pygame.draw.line(
+                screen,
+                LINK_HOVER_COLOR,
+                (hide_rect.left, hide_rect.bottom - 2),
+                (hide_rect.right, hide_rect.bottom - 2),
+                1
+            )
 
         map_surface_text = font.render(map_text, True, LINK_HOVER_COLOR if map_hovered else WHITE)
         screen.blit(map_surface_text, map_rect.topleft)
         if map_hovered:
-            pygame.draw.line(screen, LINK_HOVER_COLOR, (map_rect.left, map_rect.bottom - 2), (map_rect.right, map_rect.bottom - 2), 1)
+            pygame.draw.line(
+                screen,
+                LINK_HOVER_COLOR,
+                (map_rect.left, map_rect.bottom - 2),
+                (map_rect.right, map_rect.bottom - 2),
+                1
+            )
 
         info_surface = font.render(info_text, True, LINK_HOVER_COLOR if info_hovered else WHITE)
         screen.blit(info_surface, info_rect.topleft)
         if info_hovered:
-            pygame.draw.line(screen, LINK_HOVER_COLOR, (info_rect.left, info_rect.bottom - 2), (info_rect.right, info_rect.bottom - 2), 1)
+            pygame.draw.line(
+                screen,
+                LINK_HOVER_COLOR,
+                (info_rect.left, info_rect.bottom - 2),
+                (info_rect.right, info_rect.bottom - 2),
+                1
+            )
 
         audio_mute_surface = font.render(audio_mute_text, True, LINK_HOVER_COLOR if audio_mute_hovered else WHITE)
         screen.blit(audio_mute_surface, audio_mute_rect.topleft)
         if audio_mute_hovered:
-            pygame.draw.line(screen, LINK_HOVER_COLOR, (audio_mute_rect.left, audio_mute_rect.bottom - 2), (audio_mute_rect.right, audio_mute_rect.bottom - 2), 1)
+            pygame.draw.line(
+                screen,
+                LINK_HOVER_COLOR,
+                (audio_mute_rect.left, audio_mute_rect.bottom - 2),
+                (audio_mute_rect.right, audio_mute_rect.bottom - 2),
+                1
+            )
 
+    # Top bar
     top_bar_rect = pygame.Rect(0, 0, screen_width, top_bar_height)
     pygame.draw.rect(screen, TOP_BAR_COLOR, top_bar_rect)
     pygame.draw.rect(screen, SEPARATOR_COLOR, top_bar_rect, 1)
@@ -1170,8 +1406,8 @@ async def update_loop():
         for j, item in enumerate(items):
             i_y = drop_y + 2 + j * item_height
             i_rect = pygame.Rect(drop_x, i_y, drop_width, item_height)
-            mouse_pos = pygame.mouse.get_pos()
-            hover = i_rect.collidepoint(mouse_pos)
+            mouse_pos2 = pygame.mouse.get_pos()
+            hover = i_rect.collidepoint(mouse_pos2)
             if hover:
                 pygame.draw.rect(screen, TAB_HOVER_COLOR, i_rect)
             text_surf = font.render(item, True, WHITE)
@@ -1259,9 +1495,9 @@ async def update_loop():
                                     if not map_making_mode:
                                         directory = open_file_explorer()
                                         if directory:
-                                            current_tile = get_current_tile()
-                                            if current_tile:
-                                                current_tile.set_directory(directory)
+                                            current_tile3 = get_current_tile()
+                                            if current_tile3:
+                                                current_tile3.set_directory(directory)
                                                 current_image_index = 0
                                             restore_pygame_focus()
                                 elif item == "Remove Folder":
@@ -1303,9 +1539,9 @@ async def update_loop():
                                     elif link_text == "Select Folder":
                                         directory = open_file_explorer()
                                         if directory:
-                                            current_tile = get_current_tile()
-                                            if current_tile:
-                                                current_tile.set_directory(directory)
+                                            current_tile4 = get_current_tile()
+                                            if current_tile4:
+                                                current_tile4.set_directory(directory)
                                                 current_image_index = 0
                                             restore_pygame_focus()
                                     elif link_text == "Save Game":
@@ -1343,9 +1579,9 @@ async def update_loop():
                                             tiles[new_pos].toggle_active()
                                             if not tiles[new_pos].active:
                                                 del tiles[new_pos]
-                                            else:
-                                                tiles[new_pos] = Tile(SQUARE_SIZE)
-                                                tiles[new_pos].active = True
+                                        else:
+                                            tiles[new_pos] = Tile(SQUARE_SIZE)
+                                            tiles[new_pos].active = True
                             else:
                                 if tiles:
                                     all_pos = list(tiles.keys())
@@ -1357,7 +1593,7 @@ async def update_loop():
                                     bb_width = max_c - min_c + 1
                                     fit_width = screen_width * 0.9
                                     fit_height = (effective_screen_height - top_bar_height) * 0.9
-                                    scale = min(fit_width / bb_width, fit_height / bb_height)
+                                    scale = min(fit_width / bb_width, fit_height / bb_width)
                                     scaled_tile_size = scale
                                     player_rel_r = player_pos[0] - min_r
                                     player_rel_c = player_pos[1] - min_c
@@ -1405,11 +1641,13 @@ async def update_loop():
         move_sound.play()
         move_flag = False
 
+
 async def main():
     await setup()
     while True:
         await update_loop()
         await asyncio.sleep(1.0 / FPS)
+
 
 if platform.system() == "Emscripten":
     asyncio.ensure_future(main())
