@@ -100,12 +100,61 @@ bottom_container_y_start = 0
 sidebar_rect = pygame.Rect(0, 0, 0, 0)
 image_display_area = pygame.Rect(0, 0, 0, 0)
 
-# Rects for the two sidebar "category boxes"
 group1_box_rect = pygame.Rect(0, 0, 0, 0)
 group2_box_rect = pygame.Rect(0, 0, 0, 0)
 
 DEFAULT_IMAGE_PATH = 'image_path_logo9.svg'
 default_image_cv2 = None
+
+
+def load_svg_image(svg_path, output_width=None, output_height=None):
+    try:
+        png_data = cairosvg.svg2png(url=svg_path, output_width=output_width, output_height=output_height)
+        nparr = np.frombuffer(png_data, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+        return image
+    except Exception as e:
+        print(f"Failed to load SVG {svg_path}: {e}")
+        return None
+
+
+def load_image(filepath):
+    try:
+        _, ext = os.path.splitext(filepath)
+        ext = ext.lower()
+        if ext == '.svg':
+            return load_svg_image(filepath)
+        else:
+            image = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)
+            if image is None:
+                raise ValueError("Image not found or unable to load")
+            return image
+    except Exception:
+        return None
+
+
+def cv2_to_pygame(image):
+    if image.shape[2] == 4:
+        image_rgba = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
+        return pygame.image.frombuffer(image_rgba.tobytes(), image_rgba.shape[1::-1], 'RGBA')
+    else:
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return pygame.image.frombuffer(image_rgb.tobytes(), image_rgb.shape[1::-1], 'RGB')
+
+
+# Load sound icons
+sound_on_svg = load_image('sound_on.svg')   # shown when audio system is ON
+sound_off_svg = load_image('sound_off.svg')  # shown when audio is muted / OFF
+sound_on_surface = cv2_to_pygame(sound_on_svg) if sound_on_svg is not None else None
+sound_off_surface = cv2_to_pygame(sound_off_svg) if sound_off_svg is not None else None
+
+# Resize icons to a nice base size (will be animated slightly on hover)
+if sound_on_surface:
+    sound_on_surface = pygame.transform.smoothscale(sound_on_surface, (36, 36))
+if sound_off_surface:
+    sound_off_surface = pygame.transform.smoothscale(sound_off_surface, (36, 36))
+
+default_image_cv2 = load_image(DEFAULT_IMAGE_PATH)
 
 top_bar_height = 30
 dropdown_open = None
@@ -132,9 +181,11 @@ hide_hovered = False
 map_hovered = False
 info_hovered = False
 
-audio_mute_text = "Mute Audio"
-audio_mute_rect = pygame.Rect(0, 0, 0, 0)
-audio_mute_hovered = False
+# Sound icon button
+sound_icon_rect = pygame.Rect(0, 0, 50, 50)
+sound_icon_hovered = False
+sound_icon_scale = 1.0  # for hover animation
+
 
 font = pygame.font.SysFont('Arial', 16)
 progress_font = pygame.font.SysFont('Arial', 20)
@@ -163,7 +214,6 @@ try:
 except:
     pass
 
-# Sidebar links with dynamic Edit Mode text
 sidebar_links = [
     lambda: f"Edit Mode: {'On' if edit_mode else 'Off'}",
     lambda: f"Audio Mode: {'On' if audio_mode else 'Off'}",
@@ -176,9 +226,8 @@ sidebar_links = [
     "Install Map"
 ]
 
-# Group indices for category boxes
-GROUP1_INDICES = [0, 1, 2, 5]         # modes + folder tools
-GROUP2_INDICES = [3, 4, 6, 7, 8]      # save/load + map tools
+GROUP1_INFICES = [0, 1, 2, 5]
+GROUP2_INDICES = [3, 4, 6, 7, 8]
 
 sidebar_link_rects = []
 sidebar_link_hovered = [False] * len(sidebar_links)
@@ -267,43 +316,6 @@ tiles[center_pos].active = True
 def get_current_tile():
     pos = tuple(player_pos)
     return tiles.get(pos)
-
-
-def load_image(filepath):
-    try:
-        _, ext = os.path.splitext(filepath)
-        ext = ext.lower()
-        if ext == '.svg':
-            return load_svg_image(filepath)
-        else:
-            image = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)
-            if image is None:
-                raise ValueError("Image not found or unable to load")
-            return image
-    except Exception:
-        return None
-
-
-def cv2_to_pygame(image):
-    if image.shape[2] == 4:
-        image_rgba = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
-        return pygame.image.frombuffer(image_rgba.tobytes(), image_rgba.shape[1::-1], 'RGBA')
-    else:
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        return pygame.image.frombuffer(image_rgb.tobytes(), image_rgb.shape[1::-1], 'RGB')
-
-
-def load_svg_image(svg_path, output_width=None, output_height=None):
-    try:
-        png_data = cairosvg.svg2png(url=svg_path, output_width=output_width, output_height=output_height)
-        nparr = np.frombuffer(png_data, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
-        return image
-    except Exception:
-        return None
-
-
-default_image_cv2 = load_image(DEFAULT_IMAGE_PATH)
 
 
 def display_image(current_image, display_area, is_pygame_surface=False, scale_multiplier=1.0):
@@ -445,7 +457,8 @@ def organize_photos(input_directory, max_dimension=2400):
                     pygame.draw.rect(progress_surface, CARD_BG_COLOR, card_rect, border_radius=10)
                     bar_rect = pygame.Rect(bar_x, card_y + 60, bar_width, bar_height)
                     pygame.draw.rect(progress_surface, (100, 100, 100), bar_rect, border_radius=10)
-                    pygame.draw.rect(progress_surface, (0, 255, 0), (bar_x, card_y + 60, progress_width, bar_height), border_radius=10)
+                    pygame.draw.rect(progress_surface, (0, 255, 0),
+                                     (bar_x, card_y + 60, progress_width, bar_height), border_radius=10)
 
                     text_clear_rect = pygame.Rect(card_x, card_y, card_width, 40)
                     progress_surface.fill(CARD_BG_COLOR, text_clear_rect)
@@ -461,13 +474,18 @@ def organize_photos(input_directory, max_dimension=2400):
                     visible_lines = console_lines[-max_lines:]
                     for idx, line in enumerate(reversed(visible_lines)):
                         console_text = console_font.render(line, True, (255, 255, 255))
-                        text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height + animation_offset))
+                        text_rect = console_text.get_rect(
+                            topleft=(console_rect.left + 5,
+                                     console_rect.bottom - (idx + 1) * line_height + animation_offset))
                         if text_rect.top >= console_rect.top:
                             if text_rect.right > console_rect.right:
-                                max_chars = int((console_rect.right - text_rect.left) / (console_font.size('a')[0]))
+                                max_chars = int(
+                                    (console_rect.right - text_rect.left) / (console_font.size('a')[0]))
                                 clipped_text = line[:max_chars]
                                 console_text = console_font.render(clipped_text, True, (255, 255, 255))
-                                text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height + animation_offset))
+                                text_rect = console_text.get_rect(
+                                    topleft=(console_rect.left + 5,
+                                             console_rect.bottom - (idx + 1) * line_height + animation_offset))
                             progress_surface.blit(console_text, text_rect)
 
                     screen.blit(progress_surface, (0, 0))
@@ -484,7 +502,8 @@ def organize_photos(input_directory, max_dimension=2400):
         pygame.draw.rect(progress_surface, CARD_BG_COLOR, card_rect, border_radius=10)
         bar_rect = pygame.Rect(bar_x, card_y + 60, bar_width, bar_height)
         pygame.draw.rect(progress_surface, (100, 100, 100), bar_rect, border_radius=10)
-        pygame.draw.rect(progress_surface, (0, 255, 0), (bar_x, card_y + 60, progress_width, bar_height), border_radius=10)
+        pygame.draw.rect(progress_surface, (0, 255, 0),
+                         (bar_x, card_y + 60, progress_width, bar_height), border_radius=10)
 
         text_clear_rect = pygame.Rect(card_x, card_y, card_width, 40)
         progress_surface.fill(CARD_BG_COLOR, text_clear_rect)
@@ -500,13 +519,15 @@ def organize_photos(input_directory, max_dimension=2400):
         visible_lines = console_lines[-max_lines:]
         for idx, line in enumerate(reversed(visible_lines)):
             console_text = console_font.render(line, True, (255, 255, 255))
-            text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height))
+            text_rect = console_text.get_rect(
+                topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height))
             if text_rect.top >= console_rect.top:
                 if text_rect.right > console_rect.right:
                     max_chars = int((console_rect.right - text_rect.left) / (console_font.size('a')[0]))
                     clipped_text = line[:max_chars]
                     console_text = console_font.render(clipped_text, True, (255, 255, 255))
-                    text_rect = console_text.get_rect(topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height))
+                    text_rect = console_text.get_rect(
+                        topleft=(console_rect.left + 5, console_rect.bottom - (idx + 1) * line_height))
                 progress_surface.blit(console_text, text_rect)
 
         screen.blit(progress_surface, (0, 0))
@@ -568,21 +589,37 @@ def draw_view(mouse_pos, map_offset_x, map_offset_y, SQUARE_SIZE, BOARD_SIZE, ta
         arrow_length = SQUARE_SIZE // 2
         arrow_color = GREEN if get_current_tile() and get_current_tile().images else WHITE
         if player_direction == 0:
-            pygame.draw.polygon(target, arrow_color, [(center_x, center_y - arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(center_x, center_y - arrow_length), (center_x - 10, center_y),
+                                 (center_x + 10, center_y)])
         elif player_direction == 1:
-            pygame.draw.polygon(target, arrow_color, [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10), (center_x + 10, center_y)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(center_x + arrow_length, center_y - arrow_length), (center_x, center_y - 10),
+                                 (center_x + 10, center_y)])
         elif player_direction == 2:
-            pygame.draw.polygon(target, arrow_color, [(center_x + arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(center_x + arrow_length, center_y),
+                                 (center_x, center_y - 10), (center_x, center_y + 10)])
         elif player_direction == 3:
-            pygame.draw.polygon(target, arrow_color, [(center_x + arrow_length, center_y + arrow_length), (center_x, center_y + 10), (center_x + 10, center_y)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(center_x + arrow_length, center_y + arrow_length),
+                                 (center_x, center_y + 10), (center_x + 10, center_y)])
         elif player_direction == 4:
-            pygame.draw.polygon(target, arrow_color, [(center_x, center_y + arrow_length), (center_x - 10, center_y), (center_x + 10, center_y)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(center_x, center_y + arrow_length),
+                                 (center_x - 10, center_y), (center_x + 10, center_y)])
         elif player_direction == 5:
-            pygame.draw.polygon(target, arrow_color, [(center_x - arrow_length, center_y + arrow_length), (center_x - 10, center_y), (center_x, center_y + 10)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(center_x - arrow_length, center_y + arrow_length),
+                                 (center_x - 10, center_y), (center_x, center_y + 10)])
         elif player_direction == 6:
-            pygame.draw.polygon(target, arrow_color, [(center_x - arrow_length, center_y), (center_x, center_y - 10), (center_x, center_y + 10)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(center_x - arrow_length, center_y),
+                                 (center_x, center_y - 10), (center_x, center_y + 10)])
         elif player_direction == 7:
-            pygame.draw.polygon(target, arrow_color, [(center_x - arrow_length, center_y - arrow_length), (center_x - 10, center_y), (center_x, center_y - 10)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(center_x - arrow_length, center_y - arrow_length),
+                                 (center_x - 10, center_y), (center_x, center_y - 10)])
         return SQUARE_SIZE, 0, 0, 0, 0
     else:
         if not tiles:
@@ -637,21 +674,45 @@ def draw_view(mouse_pos, map_offset_x, map_offset_y, SQUARE_SIZE, BOARD_SIZE, ta
         arrow_length = scaled_tile_size // 2
         arrow_color = GREEN if get_current_tile() and get_current_tile().images else WHITE
         if player_direction == 0:
-            pygame.draw.polygon(target, arrow_color, [(player_screen_x, player_screen_y - arrow_length), (player_screen_x - 10, player_screen_y), (player_screen_x + 10, player_screen_y)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(player_screen_x, player_screen_y - arrow_length),
+                                 (player_screen_x - 10, player_screen_y),
+                                 (player_screen_x + 10, player_screen_y)])
         elif player_direction == 1:
-            pygame.draw.polygon(target, arrow_color, [(player_screen_x + arrow_length, player_screen_y - arrow_length), (player_screen_x, player_screen_y - 10), (player_screen_x + 10, player_screen_y)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(player_screen_x + arrow_length, player_screen_y - arrow_length),
+                                 (player_screen_x, player_screen_y - 10),
+                                 (player_screen_x + 10, player_screen_y)])
         elif player_direction == 2:
-            pygame.draw.polygon(target, arrow_color, [(player_screen_x + arrow_length, player_screen_y), (player_screen_x, player_screen_y - 10), (player_screen_x, player_screen_y + 10)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(player_screen_x + arrow_length, player_screen_y),
+                                 (player_screen_x, player_screen_y - 10),
+                                 (player_screen_x, player_screen_y + 10)])
         elif player_direction == 3:
-            pygame.draw.polygon(target, arrow_color, [(player_screen_x + arrow_length, player_screen_y + arrow_length), (player_screen_x, player_screen_y + 10), (player_screen_x + 10, player_screen_y)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(player_screen_x + arrow_length, player_screen_y + arrow_length),
+                                 (player_screen_x, player_screen_y + 10),
+                                 (player_screen_x + 10, player_screen_y)])
         elif player_direction == 4:
-            pygame.draw.polygon(target, arrow_color, [(player_screen_x, player_screen_y + arrow_length), (player_screen_x - 10, player_screen_y), (player_screen_x + 10, player_screen_y)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(player_screen_x, player_screen_y + arrow_length),
+                                 (player_screen_x - 10, player_screen_y),
+                                 (player_screen_x + 10, player_screen_y)])
         elif player_direction == 5:
-            pygame.draw.polygon(target, arrow_color, [(player_screen_x - arrow_length, player_screen_y + arrow_length), (player_screen_x - 10, player_screen_y), (player_screen_x, player_screen_y + 10)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(player_screen_x - arrow_length, player_screen_y + arrow_length),
+                                 (player_screen_x - 10, player_screen_y),
+                                 (player_screen_x, player_screen_y + 10)])
         elif player_direction == 6:
-            pygame.draw.polygon(target, arrow_color, [(player_screen_x - arrow_length, player_screen_y), (player_screen_x, player_screen_y - 10), (player_screen_x, player_screen_y + 10)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(player_screen_x - arrow_length, player_screen_y),
+                                 (player_screen_x, player_screen_y - 10),
+                                 (player_screen_x, player_screen_y + 10)])
         elif player_direction == 7:
-            pygame.draw.polygon(target, arrow_color, [(player_screen_x - arrow_length, player_screen_y - arrow_length), (player_screen_x - 10, player_screen_y), (player_screen_x, player_screen_y - 10)])
+            pygame.draw.polygon(target, arrow_color,
+                                [(player_screen_x - arrow_length, player_screen_y - arrow_length),
+                                 (player_screen_x - 10, player_screen_y),
+                                 (player_screen_x, player_screen_y - 10)])
         return scaled_tile_size, offset_x, offset_y, 0, 0, scale
 
 
@@ -695,7 +756,8 @@ def toggle_audio_mode():
     global audio_mode, selected_audio_path
     audio_mode = not audio_mode
     if audio_mode:
-        filepath = filedialog.askopenfilename(title="Select Audio File", filetypes=[("Audio Files", "*.mp3 *.wav *.ogg")])
+        filepath = filedialog.askopenfilename(title="Select Audio File",
+                                              filetypes=[("Audio Files", "*.mp3 *.wav *.ogg")])
         if filepath:
             selected_audio_path = filepath
         else:
@@ -710,9 +772,8 @@ def toggle_audio_mode():
 
 
 def toggle_audio_mute():
-    global audio_muted, audio_mute_text, current_audio_path
+    global audio_muted, current_audio_path
     audio_muted = not audio_muted
-    audio_mute_text = "Mute Audio" if not audio_muted else "Unmute Audio"
     if audio_muted:
         pygame.mixer.music.stop()
         current_audio_path = None
@@ -801,7 +862,8 @@ def export_map():
         with zipfile.ZipFile(filepath, 'w') as zipf:
             for root_dir, _, files in os.walk(temp_dir):
                 for file in files:
-                    zipf.write(os.path.join(root_dir, file), os.path.relpath(os.path.join(root_dir, file), temp_dir))
+                    zipf.write(os.path.join(root_dir, file),
+                               os.path.relpath(os.path.join(root_dir, file), temp_dir))
     messagebox.showinfo("Export Map", f"Map exported to {filepath}")
 
 
@@ -856,7 +918,6 @@ def show_info_dialog():
     )
 
 
-# Map Maker: behaves like old version, but uses "organized_photos" if present
 def start_map_making():
     global map_making_mode, map_making_folders, map_making_index, map_making_total
     global map_making_direction, preview_next_image, free_move_mode
@@ -1003,7 +1064,6 @@ def update_button_positions():
     global sidebar_rect, image_display_area, hide_rect, map_rect, info_rect, sidebar_link_rects
     global bottom_container_y_start, group1_box_rect, group2_box_rect
 
-    # Top buttons (Hide / Map / Info)
     if sidebar_visible and not maximized:
         hide_rect = font.render(hide_text, True, WHITE).get_rect(
             topleft=(sidebar_rect.left + sidebar_padding, sidebar_rect.top + sidebar_padding)
@@ -1028,12 +1088,10 @@ def update_button_positions():
         )
         info_rect = pygame.Rect(-1000, -1000, 0, 0)
 
-    # Reset link rects and box rects
     sidebar_link_rects = [pygame.Rect(0, 0, 0, 0) for _ in sidebar_links]
     group1_box_rect = pygame.Rect(0, 0, 0, 0)
     group2_box_rect = pygame.Rect(0, 0, 0, 0)
 
-    # Only layout links when sidebar is visible and not maximized
     if not (sidebar_visible and not maximized):
         return
 
@@ -1057,7 +1115,7 @@ def update_button_positions():
             link_y += line_h + sidebar_spacing
         return rect, rect.bottom + box_gap
 
-    group1_box_rect, current_y = place_group(GROUP1_INDICES, current_y)
+    group1_box_rect, current_y = place_group(GROUP1_INFICES, current_y)
     group2_box_rect, current_y = place_group(GROUP2_INDICES, current_y)
 
 
@@ -1109,7 +1167,7 @@ async def update_loop():
     global exit_map_making_hovered, lift_hovered, lift_text
     global info_dialog, close_info_button, map_making_arrow_rect, preview_next_image
     global turn_flag, move_flag, dropdown_open, tab_rects, sidebar_link_hovered, map_area_rect
-    global audio_mute_text, audio_mute_rect, audio_mute_hovered
+    global sound_icon_rect, sound_icon_hovered, sound_icon_scale
 
     if 'current_image_index' not in globals():
         current_image_index = 0
@@ -1188,14 +1246,11 @@ async def update_loop():
             current_image = current_tile.images[current_image_index]
             display_image(current_image, inner_display_area, is_pygame_surface=True)
 
-    # Layout top buttons + sidebar link rects and box rects
     update_button_positions()
 
-    # Draw sidebar content (category boxes + links)
     if sidebar_visible and not maximized:
         pygame.draw.rect(screen, SEPARATOR_COLOR, (map_offset_x, separator_y, map_width, separator_height))
 
-        # Draw box shadows + cards
         shadow_offset = 3
         shadow_color = (30, 30, 60)
         box_color = LIGHTER_BLUE
@@ -1206,13 +1261,13 @@ async def update_loop():
                 pygame.draw.rect(screen, shadow_color, shadow_rect, border_radius=8)
                 pygame.draw.rect(screen, box_color, box_rect, border_radius=8)
 
-        # Draw the links inside the boxes
         for i in range(len(sidebar_links)):
             link_rect = sidebar_link_rects[i]
             link = sidebar_links[i]
             link_text = link() if callable(link) else link
             sidebar_link_hovered[i] = link_rect.collidepoint(mouse_pos)
-            link_surface = font.render(link_text, True, LINK_HOVER_COLOR if sidebar_link_hovered[i] else WHITE)
+            link_surface = font.render(link_text, True,
+                                       LINK_HOVER_COLOR if sidebar_link_hovered[i] else WHITE)
             screen.blit(link_surface, link_rect.topleft)
             if sidebar_link_hovered[i]:
                 pygame.draw.line(
@@ -1267,7 +1322,8 @@ async def update_loop():
             )
 
         if not free_move_mode:
-            map_making_arrow_rect = pygame.Rect(image_display_area.right - 30, image_display_area.bottom - 30, 20, 20)
+            map_making_arrow_rect = pygame.Rect(image_display_area.right - 30,
+                                                image_display_area.bottom - 30, 20, 20)
             if map_making_direction is None:
                 pygame.draw.circle(screen, GREEN, map_making_arrow_rect.center, 10)
             else:
@@ -1326,57 +1382,71 @@ async def update_loop():
         hide_hovered = hide_rect.collidepoint(mouse_pos)
         map_hovered = map_rect.collidepoint(mouse_pos)
         info_hovered = info_rect.collidepoint(mouse_pos)
-        audio_mute_text = "Mute Audio" if not audio_muted else "Unmute Audio"
-        audio_mute_rect = font.render(audio_mute_text, True, WHITE).get_rect(
-            topright=(image_display_area.right - sidebar_padding, image_display_area.top + sidebar_padding)
-        )
-        audio_mute_hovered = audio_mute_rect.collidepoint(mouse_pos)
 
+        # --- Sound icon button (pictogram mute toggle with hover animation) ---
+        sound_icon_rect.topright = (image_display_area.right - 15, image_display_area.top + 10)
+        sound_icon_rect.size = (48, 48)
+        sound_icon_hovered = sound_icon_rect.collidepoint(mouse_pos)
+
+        # Hover scale animation
+        scale_speed = 0.08
+        max_scale = 1.12
+        min_scale = 1.0
+        if sound_icon_hovered:
+            sound_icon_scale += scale_speed
+            if sound_icon_scale > max_scale:
+                sound_icon_scale = max_scale
+        else:
+            sound_icon_scale -= scale_speed
+            if sound_icon_scale < min_scale:
+                sound_icon_scale = min_scale
+
+        # Glow behind button when hovered
+        if sound_icon_hovered:
+            glow_rect = sound_icon_rect.inflate(16, 16)
+            pygame.draw.rect(screen, (110, 110, 180), glow_rect, border_radius=18)
+
+        bg_color = (80, 80, 100) if sound_icon_hovered else (60, 60, 80)
+        border_color = LINK_HOVER_COLOR if sound_icon_hovered else (50, 50, 70)
+        pygame.draw.rect(screen, bg_color, sound_icon_rect, border_radius=14)
+        pygame.draw.rect(screen, border_color, sound_icon_rect, 3, border_radius=14)
+
+        icon_surface = sound_off_surface if audio_muted else sound_on_surface
+        if icon_surface:
+            base_w, base_h = icon_surface.get_size()
+            scaled_w = int(base_w * sound_icon_scale)
+            scaled_h = int(base_h * sound_icon_scale)
+            scaled_icon = pygame.transform.smoothscale(icon_surface, (scaled_w, scaled_h))
+            icon_rect = scaled_icon.get_rect(center=sound_icon_rect.center)
+            screen.blit(scaled_icon, icon_rect)
+        else:
+            # Fallback simple icon
+            color = (200, 200, 200) if not audio_muted else (100, 100, 100)
+            pygame.draw.rect(screen, color, sound_icon_rect.inflate(-16, -16), border_radius=6)
+
+        # --- Text buttons (Hide / Map / Info) ---
         hide_surface = font.render(hide_text, True, LINK_HOVER_COLOR if hide_hovered else WHITE)
         screen.blit(hide_surface, hide_rect.topleft)
         if hide_hovered:
-            pygame.draw.line(
-                screen,
-                LINK_HOVER_COLOR,
-                (hide_rect.left, hide_rect.bottom - 2),
-                (hide_rect.right, hide_rect.bottom - 2),
-                1
-            )
+            pygame.draw.line(screen, LINK_HOVER_COLOR,
+                             (hide_rect.left, hide_rect.bottom - 2),
+                             (hide_rect.right, hide_rect.bottom - 2), 1)
 
         map_surface_text = font.render(map_text, True, LINK_HOVER_COLOR if map_hovered else WHITE)
         screen.blit(map_surface_text, map_rect.topleft)
         if map_hovered:
-            pygame.draw.line(
-                screen,
-                LINK_HOVER_COLOR,
-                (map_rect.left, map_rect.bottom - 2),
-                (map_rect.right, map_rect.bottom - 2),
-                1
-            )
+            pygame.draw.line(screen, LINK_HOVER_COLOR,
+                             (map_rect.left, map_rect.bottom - 2),
+                             (map_rect.right, map_rect.bottom - 2), 1)
 
         info_surface = font.render(info_text, True, LINK_HOVER_COLOR if info_hovered else WHITE)
         screen.blit(info_surface, info_rect.topleft)
         if info_hovered:
-            pygame.draw.line(
-                screen,
-                LINK_HOVER_COLOR,
-                (info_rect.left, info_rect.bottom - 2),
-                (info_rect.right, info_rect.bottom - 2),
-                1
-            )
+            pygame.draw.line(screen, LINK_HOVER_COLOR,
+                             (info_rect.left, info_rect.bottom - 2),
+                             (info_rect.right, info_rect.bottom - 2), 1)
 
-        audio_mute_surface = font.render(audio_mute_text, True, LINK_HOVER_COLOR if audio_mute_hovered else WHITE)
-        screen.blit(audio_mute_surface, audio_mute_rect.topleft)
-        if audio_mute_hovered:
-            pygame.draw.line(
-                screen,
-                LINK_HOVER_COLOR,
-                (audio_mute_rect.left, audio_mute_rect.bottom - 2),
-                (audio_mute_rect.right, audio_mute_rect.bottom - 2),
-                1
-            )
-
-    # Top bar
+    # Top bar + menus
     top_bar_rect = pygame.Rect(0, 0, screen_width, top_bar_height)
     pygame.draw.rect(screen, TOP_BAR_COLOR, top_bar_rect)
     pygame.draw.rect(screen, SEPARATOR_COLOR, top_bar_rect, 1)
@@ -1406,8 +1476,7 @@ async def update_loop():
         for j, item in enumerate(items):
             i_y = drop_y + 2 + j * item_height
             i_rect = pygame.Rect(drop_x, i_y, drop_width, item_height)
-            mouse_pos2 = pygame.mouse.get_pos()
-            hover = i_rect.collidepoint(mouse_pos2)
+            hover = i_rect.collidepoint(pygame.mouse.get_pos())
             if hover:
                 pygame.draw.rect(screen, TAB_HOVER_COLOR, i_rect)
             text_surf = font.render(item, True, WHITE)
@@ -1526,7 +1595,7 @@ async def update_loop():
                             toggle_maximize()
                         elif info_rect.collidepoint(event.pos) and sidebar_visible and not maximized:
                             show_info_dialog()
-                        elif audio_mute_rect.collidepoint(event.pos):
+                        elif sound_icon_rect.collidepoint(event.pos):  # New pictogram button click
                             toggle_audio_mute()
                         elif sidebar_visible and not maximized:
                             for i, link_rect in enumerate(sidebar_link_rects):
@@ -1593,14 +1662,15 @@ async def update_loop():
                                     bb_width = max_c - min_c + 1
                                     fit_width = screen_width * 0.9
                                     fit_height = (effective_screen_height - top_bar_height) * 0.9
-                                    scale = min(fit_width / bb_width, fit_height / bb_width)
+                                    scale = min(fit_width / bb_width, fit_height / bb_height)
                                     scaled_tile_size = scale
                                     player_rel_r = player_pos[0] - min_r
                                     player_rel_c = player_pos[1] - min_c
                                     player_draw_x = (player_rel_c + 0.5) * scale
                                     player_draw_y = (player_rel_r + 0.5) * scale
                                     offset_x = (screen_width / 2) - player_draw_x
-                                    offset_y = top_bar_height + ((effective_screen_height - top_bar_height) / 2) - player_draw_y
+                                    offset_y = top_bar_height + (
+                                            (effective_screen_height - top_bar_height) / 2) - player_draw_y
                                     mouse_rel_x = event.pos[0] - offset_x
                                     mouse_rel_y = event.pos[1] - offset_y
                                     rel_c_float = mouse_rel_x / scale - 0.5 + min_c
