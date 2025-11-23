@@ -143,12 +143,12 @@ def cv2_to_pygame(image):
 
 
 # Load sound icons
-sound_on_svg = load_image('sound_on.svg')   # shown when audio system is ON
-sound_off_svg = load_image('sound_off.svg')  # shown when audio is muted / OFF
+sound_on_svg = load_image('sound_on.svg')
+sound_off_svg = load_image('sound_off.svg')
 sound_on_surface = cv2_to_pygame(sound_on_svg) if sound_on_svg is not None else None
 sound_off_surface = cv2_to_pygame(sound_off_svg) if sound_off_svg is not None else None
 
-# Resize icons to a nice base size (will be animated slightly on hover)
+# Resize base icons
 if sound_on_surface:
     sound_on_surface = pygame.transform.smoothscale(sound_on_surface, (36, 36))
 if sound_off_surface:
@@ -181,11 +181,11 @@ hide_hovered = False
 map_hovered = False
 info_hovered = False
 
-# Sound icon button
-sound_icon_rect = pygame.Rect(0, 0, 50, 50)
+# Sound button - pure SVG, no background
+sound_icon_rect = pygame.Rect(0, 0, 42, 42)
+sound_button_hitbox = pygame.Rect(0, 0, 90, 90)  # Large invisible click area
 sound_icon_hovered = False
-sound_icon_scale = 1.0  # for hover animation
-
+sound_icon_scale = 1.0
 
 font = pygame.font.SysFont('Arial', 16)
 progress_font = pygame.font.SysFont('Arial', 20)
@@ -547,14 +547,8 @@ def restore_pygame_focus():
 
 
 DIRECTIONS = [
-    (-1, 0),
-    (-1, 1),
-    (0, 1),
-    (1, 1),
-    (1, 0),
-    (1, -1),
-    (0, -1),
-    (-1, -1)
+    (-1, 0), (-1, 1), (0, 1), (1, 1),
+    (1, 0), (1, -1), (0, -1), (-1, -1)
 ]
 
 
@@ -1167,7 +1161,7 @@ async def update_loop():
     global exit_map_making_hovered, lift_hovered, lift_text
     global info_dialog, close_info_button, map_making_arrow_rect, preview_next_image
     global turn_flag, move_flag, dropdown_open, tab_rects, sidebar_link_hovered, map_area_rect
-    global sound_icon_rect, sound_icon_hovered, sound_icon_scale
+    global sound_icon_hovered, sound_icon_scale
 
     if 'current_image_index' not in globals():
         current_image_index = 0
@@ -1383,48 +1377,50 @@ async def update_loop():
         map_hovered = map_rect.collidepoint(mouse_pos)
         info_hovered = info_rect.collidepoint(mouse_pos)
 
-        # --- Sound icon button (pictogram mute toggle with hover animation) ---
-        sound_icon_rect.topright = (image_display_area.right - 15, image_display_area.top + 10)
-        sound_icon_rect.size = (48, 48)
-        sound_icon_hovered = sound_icon_rect.collidepoint(mouse_pos)
+        # --- NEW: Beautiful Transparent SVG Sound Button (no background) ---
+        sound_icon_rect.topright = (image_display_area.right - 18, image_display_area.top + 18)
+        sound_icon_rect.size = (42, 42)
 
-        # Hover scale animation
-        scale_speed = 0.08
-        max_scale = 1.12
-        min_scale = 1.0
-        if sound_icon_hovered:
-            sound_icon_scale += scale_speed
-            if sound_icon_scale > max_scale:
-                sound_icon_scale = max_scale
+        # Large invisible hitbox for easy clicking
+        sound_button_hitbox.center = sound_icon_rect.center
+        sound_button_hitbox.size = (90, 90)
+        sound_icon_hovered = sound_button_hitbox.collidepoint(mouse_pos)
+
+        # Smooth hover scale
+        target_scale = 1.28 if sound_icon_hovered else 1.0
+        sound_icon_scale += (target_scale - sound_icon_scale) * 0.18
+
+        # Subtle glow on hover
+        if sound_icon_hovered and sound_icon_scale > 1.1:
+            glow_intensity = int(30 + (sound_icon_scale - 1.0) * 120)
+            glow_size = int(70 * sound_icon_scale)
+            glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (100, 170, 255, glow_intensity),
+                              (glow_size//2, glow_size//2), glow_size//2)
+            screen.blit(glow_surf, glow_surf.get_rect(center=sound_icon_rect.center))
+
+        current_icon = sound_off_surface if audio_muted else sound_on_surface
+        if current_icon:
+            w, h = current_icon.get_size()
+            new_w, new_h = int(w * sound_icon_scale), int(h * sound_icon_scale)
+            scaled = pygame.transform.smoothscale(current_icon, (new_w, new_h))
+            rect = scaled.get_rect(center=sound_icon_rect.center)
+            screen.blit(scaled, rect)
+
+            # Breathing pulse when audio is playing
+            if not audio_muted and current_audio_path:
+                pulse = int(80 + 50 * abs((pygame.time.get_ticks() % 800 - 400) / 400))
+                pulse_surf = pygame.Surface((24, 24), pygame.SRCALPHA)
+                pygame.draw.circle(pulse_surf, (0, 255, 150, pulse), (12, 12), 10)
+                screen.blit(pulse_surf, pulse_surf.get_rect(center=sound_icon_rect.center))
         else:
-            sound_icon_scale -= scale_speed
-            if sound_icon_scale < min_scale:
-                sound_icon_scale = min_scale
-
-        # Glow behind button when hovered
-        if sound_icon_hovered:
-            glow_rect = sound_icon_rect.inflate(16, 16)
-            pygame.draw.rect(screen, (110, 110, 180), glow_rect, border_radius=18)
-
-        bg_color = (80, 80, 100) if sound_icon_hovered else (60, 60, 80)
-        border_color = LINK_HOVER_COLOR if sound_icon_hovered else (50, 50, 70)
-        pygame.draw.rect(screen, bg_color, sound_icon_rect, border_radius=14)
-        pygame.draw.rect(screen, border_color, sound_icon_rect, 3, border_radius=14)
-
-        icon_surface = sound_off_surface if audio_muted else sound_on_surface
-        if icon_surface:
-            base_w, base_h = icon_surface.get_size()
-            scaled_w = int(base_w * sound_icon_scale)
-            scaled_h = int(base_h * sound_icon_scale)
-            scaled_icon = pygame.transform.smoothscale(icon_surface, (scaled_w, scaled_h))
-            icon_rect = scaled_icon.get_rect(center=sound_icon_rect.center)
-            screen.blit(scaled_icon, icon_rect)
-        else:
-            # Fallback simple icon
             color = (200, 200, 200) if not audio_muted else (100, 100, 100)
-            pygame.draw.rect(screen, color, sound_icon_rect.inflate(-16, -16), border_radius=6)
+            pygame.draw.circle(screen, color, sound_icon_rect.center, 16)
+            if audio_muted:
+                pygame.draw.line(screen, (255, 80, 80),
+                                 sound_icon_rect.topleft, sound_icon_rect.bottomright, 4)
 
-        # --- Text buttons (Hide / Map / Info) ---
+        # Text buttons (Hide / Map / Info)
         hide_surface = font.render(hide_text, True, LINK_HOVER_COLOR if hide_hovered else WHITE)
         screen.blit(hide_surface, hide_rect.topleft)
         if hide_hovered:
@@ -1595,7 +1591,7 @@ async def update_loop():
                             toggle_maximize()
                         elif info_rect.collidepoint(event.pos) and sidebar_visible and not maximized:
                             show_info_dialog()
-                        elif sound_icon_rect.collidepoint(event.pos):  # New pictogram button click
+                        elif sound_button_hitbox.collidepoint(event.pos):
                             toggle_audio_mute()
                         elif sidebar_visible and not maximized:
                             for i, link_rect in enumerate(sidebar_link_rects):
