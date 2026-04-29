@@ -345,12 +345,19 @@ def load_images_from_directory(directory):
     images = []
     filenames = []
     files = [f for f in os.listdir(directory) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
-    files.sort(key=lambda x: int(os.path.splitext(x)[0]) if os.path.splitext(x)[0].isdigit() else x)
+
+    def sort_key(x):   # 👈 ADD THIS HERE
+        name = os.path.splitext(x)[0]
+        return (0, int(name)) if name.isdigit() else (1, name.lower())
+
+    files.sort(key=sort_key)   # 👈 AND THIS
+
     for filename in files:
         filepath = os.path.join(directory, filename)
         image = pygame.image.load(filepath)
         images.append(image)
         filenames.append(filename)
+
     return images, filenames
 
 
